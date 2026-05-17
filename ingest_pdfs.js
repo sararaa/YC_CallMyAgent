@@ -1,11 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import Supermemory from 'supermemory';
+import Supermemory, { toFile } from 'supermemory';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Read .env.local
 function loadEnv() {
   const envPath = path.join(__dirname, '.env.local');
   if (!fs.existsSync(envPath)) return;
@@ -21,12 +20,37 @@ function loadEnv() {
 
 loadEnv();
 
-const client = new Supermemory({
-  apiKey: process.env.SUPERMEMORY_API_KEY,
-});
-
+const client = new Supermemory({ apiKey: process.env.SUPERMEMORY_API_KEY });
 const DATA_DIR = path.join(__dirname, 'Data_RAG');
-const CONTAINER_TAG = 'rag_data'; // tag all docs for easy retrieval
+const CONTAINER_TAG = 'rag_data';
+
+async function getExistingDocs() {
+  const existing = { done: new Set(), failedIds: [] };
+  let page = 1;
+
+  while (true) {
+    const res = await client.documents.list({
+      containerTags: [CONTAINER_TAG],
+      limit: 100,
+      page,
+    });
+
+    for (const doc of res.memories) {
+      const source = doc.metadata?.source;
+      if (!source) continue;
+      if (doc.status === 'done') {
+        existing.done.add(source);
+      } else if (doc.status === 'failed') {
+        existing.failedIds.push({ id: doc.id, source });
+      }
+    }
+
+    if (res.memories.length < 100) break;
+    page++;
+  }
+
+  return existing;
+}
 
 async function ingest() {
   const files = fs.readdirSync(DATA_DIR).filter(f => f.toLowerCase().endsWith('.pdf'));
@@ -36,26 +60,54 @@ async function ingest() {
     return;
   }
 
-  console.log(`Found ${files.length} PDF(s). Uploading to Supermemory...`);
+  console.log('Checking existing documents in Supermemory...');
+  const { done: alreadyUploaded, failedIds } = await getExistingDocs();
 
-  for (const filename of files) {
+  // Delete failed docs so they can be re-uploaded cleanly
+  if (failedIds.length > 0) {
+    console.log(`Cleaning up ${failedIds.length} previously failed doc(s)...`);
+    for (const { id, source } of failedIds) {
+      try {
+        await client.documents.delete(id);
+        console.log(`  Deleted failed: ${source}`);
+      } catch (err) {
+        console.warn(`  Could not delete ${id}: ${err.message}`);
+      }
+    }
+  }
+
+  const toUpload = files.filter(f => !alreadyUploaded.has(f));
+  const skipped = files.length - toUpload.length;
+
+  if (skipped > 0) console.log(`Skipping ${skipped} already-uploaded PDF(s).`);
+  if (toUpload.length === 0) {
+    console.log('All PDFs already in Supermemory. Nothing to do.');
+    return;
+  }
+
+  console.log(`Uploading ${toUpload.length} new PDF(s)...`);
+
+  for (const filename of toUpload) {
     const filePath = path.join(DATA_DIR, filename);
-    console.log(`  Uploading: ${filename}`);
+    process.stdout.write(`  ${filename} ... `);
     try {
+      // toFile with explicit MIME type is required — raw ReadStream has no type info
+      const file = await toFile(fs.createReadStream(filePath), filename, {
+        type: 'application/pdf',
+      });
       const response = await client.documents.uploadFile({
-        file: fs.createReadStream(filePath),
+        file,
         fileType: 'pdf',
         containerTags: CONTAINER_TAG,
         metadata: JSON.stringify({ source: filename }),
       });
-      console.log(`  ✓ ${filename} → id: ${response.id}`);
+      console.log(`✓ id: ${response.id}`);
     } catch (err) {
-      console.error(`  ✗ ${filename} failed: ${err.message}`);
+      console.log(`✗ ${err.message}`);
     }
   }
 
-  console.log('\nDone. Search your docs like this:');
-  console.log('  const results = await client.search.execute({ q: "your query", containerTags: ["rag_data"] });');
+  console.log('\nDone.');
 }
 
 ingest();
