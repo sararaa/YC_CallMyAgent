@@ -1,6 +1,9 @@
 import math
 from datetime import datetime, timezone
 
+from sqlmodel import select
+
+from backend.charger_synth import _wo_to_frontend
 from backend.db import models
 from backend.db.session import get_session
 from backend.memory import supermemory_client, moss_client
@@ -55,6 +58,10 @@ async def send_remote_command(
         "command": command,
         "status": "queued",
     })
+    await bus.emit("state_focus", s.session_id, {
+        "state": s.current_state,
+        "text": f"Sending {command} → {charger_id}",
+    })
     return {"command_id": cid, "status": "queued"}
 
 
@@ -105,9 +112,11 @@ async def create_work_order(
         "symptoms": symptoms,
         "status": "open",
     })
+    await bus.emit("state_focus", s.session_id, {
+        "state": s.current_state,
+        "text": f"Opening {severity}-severity work order · {charger_id}",
+    })
     # Also emit a frontend-shaped work order for ChargePulse
-    from backend.charger_synth import _wo_to_frontend
-    from backend.db.session import get_session
     with get_session() as db:
         wo_row = db.get(models.WorkOrder, woid)
         if wo_row:
@@ -149,21 +158,37 @@ async def generate_report(
     if confidence is not None:
         s.confidence_samples.append(confidence)
     overall = _geo_mean(s.confidence_samples)
+    # Idempotent: only insert once per session. If the model calls generate_report
+    # multiple times (parallel webhooks, retries, etc.), upsert.
     with get_session() as db:
-        r = models.CallReport(
-            session_id=s.session_id,
-            caller_phone=s.caller_phone,
-            resolution_type=resolution_type,
-            summary=summary,
-            actions_taken=actions_str,
-            follow_up_needed=follow_up_needed,
-            confidence=confidence,
-            overall_confidence=overall,
-        )
-        db.add(r)
-        db.commit()
-        db.refresh(r)
-        rid = r.id
+        existing = db.exec(select(models.CallReport).where(models.CallReport.session_id == s.session_id)).first()
+        if existing:
+            existing.resolution_type = resolution_type
+            existing.summary = summary
+            existing.actions_taken = actions_str
+            existing.follow_up_needed = follow_up_needed
+            existing.confidence = confidence
+            existing.overall_confidence = overall
+            db.add(existing)
+            db.commit()
+            db.refresh(existing)
+            rid = existing.id
+        else:
+            r = models.CallReport(
+                session_id=s.session_id,
+                caller_phone=s.caller_phone,
+                resolution_type=resolution_type,
+                summary=summary,
+                actions_taken=actions_str,
+                follow_up_needed=follow_up_needed,
+                confidence=confidence,
+                overall_confidence=overall,
+            )
+            db.add(r)
+            db.commit()
+            db.refresh(r)
+            rid = r.id
+    s.report_generated = True
     await bus.emit("admin_update", s.session_id, {
         "kind": "report",
         "id": rid,
@@ -213,6 +238,9 @@ async def generate_report(
 
 async def end_call(s: CallSession, **_kw) -> dict:
     """Push transcript + summary to Supermemory, wipe Moss session index."""
+    if s.call_ended:
+        return {"ok": True, "already_ended": True}
+    s.call_ended = True
     transcript_lines = []
     for turn in s.history:
         role = turn.get("role", "?")
@@ -249,7 +277,6 @@ async def end_call(s: CallSession, **_kw) -> dict:
 
     duration_s = (datetime.now(timezone.utc) - s.started_at).total_seconds()
     with get_session() as db:
-        from sqlmodel import select  # local import to keep top tidy
         existing = db.exec(select(models.CallLog).where(models.CallLog.session_id == s.session_id)).first()
         if existing:
             existing.ended_at = datetime.now(timezone.utc)

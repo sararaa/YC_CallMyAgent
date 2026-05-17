@@ -22,19 +22,24 @@ async def _transition(s: CallSession, tool_name: str, reason: str | None, confid
         "reason": reason,
         "confidence": confidence,
     })
+    if reason:
+        await bus.emit("state_focus", s.session_id, {
+            "state": new_state,
+            "text": reason,
+        })
     return {"ok": True, "new_state": new_state}
 
 
-async def advance_to_scoping(s: CallSession, **_kw) -> dict:
-    return await _transition(s, "advance_to_scoping", None, None)
+async def advance_to_scoping(s: CallSession, reason: str | None = None, **_kw) -> dict:
+    return await _transition(s, "advance_to_scoping", reason, None)
 
 
-async def advance_to_triage(s: CallSession, **_kw) -> dict:
-    return await _transition(s, "advance_to_triage", None, None)
+async def advance_to_triage(s: CallSession, reason: str | None = None, **_kw) -> dict:
+    return await _transition(s, "advance_to_triage", reason, None)
 
 
-async def advance_to_wrap_up(s: CallSession, **_kw) -> dict:
-    return await _transition(s, "advance_to_wrap_up", None, None)
+async def advance_to_wrap_up(s: CallSession, reason: str | None = None, **_kw) -> dict:
+    return await _transition(s, "advance_to_wrap_up", reason, None)
 
 
 async def route_to_user_issue(s: CallSession, reason: str | None = None, confidence: float | None = None, **_kw) -> dict:

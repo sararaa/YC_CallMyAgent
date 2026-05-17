@@ -74,10 +74,18 @@ async def run_turn(s: CallSession, user_text: str) -> str:
     _record_turn(s, "user", [{"text": user_text}])
 
     # Loop until model returns a plain-text reply (no more function calls queued)
-    for _hop in range(8):  # safety cap
+    for hop in range(8):  # safety cap
         tools = tools_for_state(s.current_state)
         sys = system_prompt(s.current_state)
         history = _serialize_history(s)
+
+        tool_names = [d["name"] for t in tools for d in t.get("function_declarations", [])]
+        log.info(
+            "GEMINI > state=%s hop=%d history_turns=%d tools=%s",
+            s.current_state, hop, len(history), tool_names,
+        )
+        log.debug("GEMINI > system_instruction=%r", sys)
+        log.debug("GEMINI > history=%s", json.dumps(s.history, default=str)[:2000])
 
         t0 = time.perf_counter()
         try:
@@ -91,12 +99,31 @@ async def run_turn(s: CallSession, user_text: str) -> str:
                 ),
             )
         except Exception as e:  # noqa: BLE001
-            log.exception("gemini call failed")
+            log.exception("GEMINI ! call failed: %s", e)
+            s.last_debug = {
+                "state": s.current_state,
+                "hop": hop,
+                "system_instruction": sys,
+                "tools": tool_names,
+                "history": s.history,
+                "error": repr(e),
+            }
             reply = "Sorry, I had a hiccup on my end. Could you repeat that?"
             await bus.emit("transcript", s.session_id, {"role": "agent", "text": reply, "error": str(e)})
             return reply
         gemini_ms = (time.perf_counter() - t0) * 1000
         await bus.emit("latency_sample", s.session_id, {"component": "gemini", "ms": gemini_ms})
+        try:
+            usage = getattr(resp, "usage_metadata", None)
+            finish = getattr((resp.candidates or [None])[0], "finish_reason", None)
+            log.info(
+                "GEMINI < %.0fms finish=%s prompt_tokens=%s candidates_tokens=%s",
+                gemini_ms, finish,
+                getattr(usage, "prompt_token_count", None) if usage else None,
+                getattr(usage, "candidates_token_count", None) if usage else None,
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
         candidate = (resp.candidates or [None])[0]
         if not candidate or not candidate.content or not candidate.content.parts:
@@ -117,6 +144,21 @@ async def run_turn(s: CallSession, user_text: str) -> str:
             elif part.text:
                 text_chunks.append(part.text)
                 recorded_parts.append({"text": part.text})
+        log.info(
+            "GEMINI < parts: %d function_calls=%s text=%r",
+            len(candidate.content.parts),
+            [(fc.name, dict(fc.args or {})) for fc in function_calls],
+            (" ".join(text_chunks))[:200],
+        )
+        s.last_debug = {
+            "state": s.current_state,
+            "hop": hop,
+            "system_instruction": sys,
+            "tools": tool_names,
+            "history": s.history,
+            "response_parts": recorded_parts,
+            "duration_ms": gemini_ms,
+        }
         _record_turn(s, "model", recorded_parts)
 
         # Execute every queued tool call
@@ -162,7 +204,10 @@ async def run_turn(s: CallSession, user_text: str) -> str:
             continue
 
         # No tool calls — we have a user-facing reply
-        reply = " ".join(text_chunks).strip() or "…"
+        reply = " ".join(text_chunks).strip()
+        if not reply:
+            # Safety net: never return empty text → caller hears silence.
+            reply = _filler_for_state(s.current_state)
         try:
             await memory_tool.append_turn(s, "agent", reply)
         except Exception as e:  # noqa: BLE001
@@ -174,6 +219,22 @@ async def run_turn(s: CallSession, user_text: str) -> str:
     fallback = "Let me make sure I understood — could you say that again?"
     await bus.emit("transcript", s.session_id, {"role": "agent", "text": fallback})
     return fallback
+
+
+_STATE_FILLERS = {
+    "greeting":         "One moment, let me get you set up.",
+    "scoping":          "Got it — let me make sure I understand.",
+    "triage":           "OK, working out what category this falls under.",
+    "resolve_user":     "Walking through this with you, one sec.",
+    "resolve_software": "Let me check the charger's status.",
+    "resolve_hardware": "Pulling up the charger's diagnostics.",
+    "wrap_up":          "Wrapping things up now.",
+    "ended":            "Thanks for calling — have a great day.",
+}
+
+
+def _filler_for_state(state: str) -> str:
+    return _STATE_FILLERS.get(state, "One moment.")
 
 
 def _result_preview(result: dict | None) -> str:

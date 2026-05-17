@@ -30,4 +30,8 @@ async def get_charger_telemetry(s: CallSession, charger_id: str) -> dict:
         "charger_id": cid,
         "markdown": markdown,
     })
+    await bus.emit("state_focus", s.session_id, {
+        "state": s.current_state,
+        "text": f"Inspecting telemetry · {cid}",
+    })
     return {"charger_id": cid, "markdown": markdown, "loaded_ms": int(loaded_ms)}
