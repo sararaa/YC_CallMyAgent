@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -11,6 +12,14 @@ class CallSession:
     history: list[dict] = field(default_factory=list)  # gemini Content list
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     confidence_samples: list[float] = field(default_factory=list)
+    last_debug: dict | None = None  # last raw Gemini I/O for /api/admin/debug
+    report_generated: bool = False  # idempotency flag for generate_report
+    call_ended: bool = False  # idempotency flag for end_call
+    # Serializes turn-processing per call so overlapping AgentPhone webhooks
+    # don't race the same state machine.
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Deduplicate identical caller utterances re-delivered by AgentPhone.
+    last_caller_utterance: str = ""
 
 
 _sessions: dict[str, CallSession] = {}

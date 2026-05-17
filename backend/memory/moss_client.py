@@ -42,21 +42,21 @@ class _RealMoss:
     async def create_index(self, name: str, docs: list[dict]) -> None:
         from inferedge_moss import DocumentInfo  # noqa: WPS433
         infos = [DocumentInfo(id=d["id"], text=d["text"], metadata=d.get("metadata")) for d in docs]
-        await asyncio.to_thread(self._client.create_index, name, infos, "moss-minilm")
-        await asyncio.to_thread(self._client.load_index, name)
+        await self._client.create_index(name, infos, "moss-minilm")
+        await self._client.load_index(name)
 
     async def add_docs(self, name: str, docs: list[dict]) -> None:
         from inferedge_moss import DocumentInfo  # noqa: WPS433
         infos = [DocumentInfo(id=d["id"], text=d["text"], metadata=d.get("metadata")) for d in docs]
-        await asyncio.to_thread(self._client.add_docs, name, infos)
+        await self._client.add_docs(name, infos)
         if config.MOSS_FORCE_REFRESH_ON_ADD:
-            await asyncio.to_thread(self._client.load_index, name)
+            await self._client.load_index(name)
 
     async def query(self, name: str, q: str, top_k: int = 5) -> QueryResult:
         from inferedge_moss import QueryOptions  # noqa: WPS433
         t = time.perf_counter()
         try:
-            res = await asyncio.to_thread(self._client.query, name, q, QueryOptions(top_k=top_k, alpha=0.8))
+            res = await self._client.query(name, q, QueryOptions(top_k=top_k, alpha=0.8))
         except Exception as e:  # noqa: BLE001
             log.warning("moss query failed on %s: %s", name, e)
             return QueryResult(hits=[], latency_ms=(time.perf_counter() - t) * 1000, hit=False)
@@ -74,9 +74,17 @@ class _RealMoss:
 
     async def delete_index(self, name: str) -> None:
         try:
-            await asyncio.to_thread(self._client.delete_index, name)
+            await self._client.delete_index(name)
         except Exception as e:  # noqa: BLE001
             log.warning("moss delete_index(%s) failed: %s", name, e)
+
+    async def list_indexes(self) -> list[str]:
+        try:
+            idx = await self._client.list_indexes()
+            return [getattr(i, "name", "") for i in idx if getattr(i, "name", "")]
+        except Exception as e:  # noqa: BLE001
+            log.warning("moss list_indexes failed: %s", e)
+            return []
 
 
 # ---------- Stub (in-memory) ----------
@@ -129,6 +137,9 @@ class _StubMoss:
         await asyncio.sleep(0.005)
         self._indexes.pop(name, None)
 
+    async def list_indexes(self) -> list[str]:
+        return list(self._indexes.keys())
+
 
 # ---------- Singleton ----------
 
@@ -160,3 +171,20 @@ async def query(name: str, q: str, top_k: int = 5) -> QueryResult:
 
 async def delete_index(name: str) -> None:
     await client().delete_index(name)
+
+
+async def list_indexes() -> list[str]:
+    return await client().list_indexes()
+
+
+async def prune_orphan_sessions() -> int:
+    """Delete leftover session-* indexes from previous runs.
+    Moss has a low index ceiling on the free tier; orphan sessions accumulate
+    fast if the server crashes mid-call or end_call doesn't fire."""
+    names = await list_indexes()
+    orphans = [n for n in names if n.startswith("session-")]
+    for n in orphans:
+        await delete_index(n)
+    if orphans:
+        log.info("pruned %d orphan moss session indexes", len(orphans))
+    return len(orphans)

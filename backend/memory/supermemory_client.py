@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -10,6 +11,14 @@ from typing import Any
 from backend import config
 
 log = logging.getLogger("volt.supermemory")
+
+
+def _sanitize_tag(tag: str) -> str:
+    """Supermemory container tags must match /^[a-zA-Z0-9_:-]+$/. Phone numbers
+    have a `+` prefix which fails the regex. Strip everything else and prefix
+    so the tag is stable and human-readable in their dashboard."""
+    cleaned = re.sub(r"[^a-zA-Z0-9_:-]", "", tag or "")
+    return f"caller_{cleaned}" if cleaned else "anon"
 
 
 @dataclass
@@ -35,11 +44,14 @@ class _RealSm:
         self._client = AsyncSupermemory(api_key=config.SUPERMEMORY_API_KEY)
 
     async def add(self, content: str, container_tag: str, metadata: dict | None = None) -> str:
+        tag = _sanitize_tag(container_tag)
         t = time.perf_counter()
         try:
-            res = await self._client.memories.add(
+            # Supermemory SDK: .add() is at top-level, not under .memories.
+            # .memories only exposes forget/update_memory.
+            res = await self._client.add(
                 content=content,
-                container_tag=container_tag,
+                container_tag=tag,
                 metadata=metadata or {},
             )
             mid = getattr(res, "id", "") or getattr(res, "memory_id", "")
@@ -50,11 +62,12 @@ class _RealSm:
         return mid
 
     async def search(self, query: str, container_tag: str, top_k: int = 10) -> SmResult:
+        tag = _sanitize_tag(container_tag)
         t = time.perf_counter()
         try:
             res = await self._client.search.execute(
                 q=query,
-                container_tags=[container_tag],
+                container_tags=[tag],
                 limit=top_k,
             )
             raw_hits = getattr(res, "results", []) or []

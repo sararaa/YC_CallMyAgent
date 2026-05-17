@@ -26,12 +26,18 @@ async def lifespan(_: FastAPI):
         log.warning("MOSS_PROJECT_ID / MOSS_PROJECT_KEY not set — using in-memory stub.")
     if not config.GEMINI_API_KEY:
         log.warning("GEMINI_API_KEY not set — agent turns will fail until populated.")
-    # Auto-build volt-kb in stub mode (in-memory stub dies between restarts).
-    # In real Moss mode, you've already run `python -m backend.scripts.upload`
-    # and the index persists in the cloud — rebuilding on every boot would waste time.
-    if config.using_moss_stub():
-        n = await build_volt_kb()
-        log.info("volt-kb auto-loaded with %d chunks (stub mode)", n)
+    # Prune orphan session indexes from prior runs (Moss free tier caps at 3).
+    try:
+        from backend.memory.moss_client import prune_orphan_sessions, list_indexes
+        await prune_orphan_sessions()
+        # Auto-build volt-kb if it doesn't exist yet (stub mode always, real
+        # mode only on first boot).
+        indexes = await list_indexes()
+        if config.VOLT_KB_INDEX not in indexes:
+            n = await build_volt_kb()
+            log.info("volt-kb built with %d chunks", n)
+    except Exception as e:  # noqa: BLE001
+        log.warning("startup moss bootstrap failed: %s", e)
     yield
 
 

@@ -60,7 +60,12 @@ DECLARATIONS: dict[str, dict] = {
     },
     "send_remote_command": {
         "name": "send_remote_command",
-        "description": "Queue a remote command against a charger.",
+        "description": (
+            "Queue a remote command against a charger. IMPORTANT: this returns instantly with "
+            "status=queued; you receive NO feedback on whether the command actually worked. "
+            "After calling this, your next reply MUST ask the caller to physically verify the "
+            "outcome ('what does the screen show now?'). Do not assume success or failure."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -134,45 +139,116 @@ DECLARATIONS: dict[str, dict] = {
     },
     "advance_to_scoping": {
         "name": "advance_to_scoping",
-        "description": "Transition to the scoping stage.",
-        "parameters": {"type": "object", "properties": {"reason": {"type": "string"}}, "required": []},
+        "description": "Transition to the scoping stage. The `reason` should name the SURFACE-LEVEL PROBLEM the caller just reported, in their own framing.",
+        "parameters": {
+            "type": "object",
+            "properties": {"reason": {
+                "type": "string",
+                "description": (
+                    "What the caller just said is wrong, in 5-10 words and their framing. "
+                    "Examples: 'Charger at UC Davis won't start a session', "
+                    "'App keeps charging my card twice', "
+                    "'Cable is stuck in the car'. "
+                    "Do NOT diagnose yet — just restate the symptom."
+                ),
+            }},
+            "required": ["reason"],
+        },
     },
     "advance_to_triage": {
         "name": "advance_to_triage",
-        "description": "Transition to the triage stage.",
-        "parameters": {"type": "object", "properties": {"reason": {"type": "string"}}, "required": []},
+        "description": "Transition to the triage stage. The `reason` should describe WHAT YOU NEED TO DECIDE next — the specific user vs software vs hardware question this caller's problem raises.",
+        "parameters": {
+            "type": "object",
+            "properties": {"reason": {
+                "type": "string",
+                "description": (
+                    "The triage decision in front of you, in 6-10 words. "
+                    "Examples: 'Deciding if cable-stuck is software lock or hardware', "
+                    "'Distinguishing payment glitch from account suspension', "
+                    "'Checking if no-start is connector damage or pilot signal'. "
+                    "Frame as a decision, not a symptom restatement."
+                ),
+            }},
+            "required": ["reason"],
+        },
     },
     "route_to_user_issue": {
         "name": "route_to_user_issue",
-        "description": "Route to user-issue resolution (account/app/payment/confusion).",
+        "description": "Route to user-issue resolution (account/app/payment/confusion). The `reason` should name the specific KB/guide topic you're about to walk them through.",
         "parameters": {
             "type": "object",
-            "properties": {"reason": REASON, "confidence": CONFIDENCE},
-            "required": [],
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": (
+                        "The specific user-side topic, in 5-10 words. "
+                        "Examples: 'Walking through payment-failure refund flow', "
+                        "'Resetting account password via app', "
+                        "'Explaining how RFID re-pairing works'."
+                    ),
+                },
+                "confidence": CONFIDENCE,
+            },
+            "required": ["reason"],
         },
     },
     "route_to_software_issue": {
         "name": "route_to_software_issue",
-        "description": "Route to software-issue resolution (charger online but misbehaving).",
+        "description": "Route to software-issue resolution (charger online but misbehaving). The `reason` should name the suspected software fault — what error code or behaviour points here.",
         "parameters": {
             "type": "object",
-            "properties": {"reason": REASON, "confidence": CONFIDENCE},
-            "required": [],
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": (
+                        "The suspected software fault, in 5-10 words. "
+                        "Examples: 'Session-stuck error suggests OCPP comm fault', "
+                        "'Ghost-availability fault — needs remote reset', "
+                        "'Slow charge despite handshake — firmware bug'."
+                    ),
+                },
+                "confidence": CONFIDENCE,
+            },
+            "required": ["reason"],
         },
     },
     "route_to_hardware_issue": {
         "name": "route_to_hardware_issue",
-        "description": "Route to hardware-issue resolution (physical damage, won't power on, etc).",
+        "description": "Route to hardware-issue resolution. The `reason` should name the suspected physical fault — what symptom points to hardware.",
         "parameters": {
             "type": "object",
-            "properties": {"reason": REASON, "confidence": CONFIDENCE},
-            "required": [],
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": (
+                        "The suspected physical fault, in 5-10 words. "
+                        "Examples: 'Contactor welded — blinking red, no engagement', "
+                        "'Connector pins look corroded per caller', "
+                        "'Cable lock mechanism jammed'."
+                    ),
+                },
+                "confidence": CONFIDENCE,
+            },
+            "required": ["reason"],
         },
     },
     "advance_to_wrap_up": {
         "name": "advance_to_wrap_up",
-        "description": "Transition to the wrap-up stage.",
-        "parameters": {"type": "object", "properties": {"reason": {"type": "string"}}, "required": []},
+        "description": "Transition to the wrap-up stage. The `reason` should name the CONCRETE OUTCOME you're closing the call with — what was actually done.",
+        "parameters": {
+            "type": "object",
+            "properties": {"reason": {
+                "type": "string",
+                "description": (
+                    "The actual outcome of this call, in 6-12 words, mentioning the action taken. "
+                    "Examples: 'WO-0017 opened, technician ETA 24h', "
+                    "'Remote reboot issued — session restored', "
+                    "'Walked caller through payment retry — confirmed working'."
+                ),
+            }},
+            "required": ["reason"],
+        },
     },
     "end_call": {
         "name": "end_call",
@@ -201,9 +277,28 @@ DISPATCH: dict[str, Dispatcher] = {
 }
 
 
+_TYPE_MAP = {
+    "object": "OBJECT", "string": "STRING", "number": "NUMBER",
+    "integer": "INTEGER", "boolean": "BOOLEAN", "array": "ARRAY",
+}
+
+
+def _to_gemini_schema(node):
+    """The google-genai pydantic validator wants UPPERCASE Type enum values.
+    Our declarations use JSON Schema-style lowercase. Convert at the boundary."""
+    if isinstance(node, dict):
+        return {
+            k: (_TYPE_MAP.get(v, v) if k == "type" and isinstance(v, str) else _to_gemini_schema(v))
+            for k, v in node.items()
+        }
+    if isinstance(node, list):
+        return [_to_gemini_schema(x) for x in node]
+    return node
+
+
 def tools_for_state(state: str) -> list[dict]:
     names = STATES[state]["tools"]
-    return [{"function_declarations": [DECLARATIONS[n] for n in names]}]
+    return [{"function_declarations": [_to_gemini_schema(DECLARATIONS[n]) for n in names]}]
 
 
 async def dispatch(s: CallSession, name: str, args: dict[str, Any]) -> dict:

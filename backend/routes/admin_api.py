@@ -38,6 +38,25 @@ def call_logs() -> list[dict]:
         return [r.model_dump() for r in rows]
 
 
+@router.get("/debug")
+def debug_last_turn() -> dict:
+    """Returns the most recent Gemini turn's full prompt + tools + response.
+    Useful for figuring out 'what did Gemini actually see and say?' without
+    tailing logs. Picks the most-recently-active live session."""
+    from backend.session import _sessions  # noqa: WPS437 — debug introspection
+    sessions = sorted(_sessions.values(), key=lambda s: s.started_at, reverse=True)
+    if not sessions:
+        return {"active_sessions": 0, "message": "No active sessions. Trigger a call via /simulate."}
+    s = sessions[0]
+    return {
+        "session_id": s.session_id,
+        "caller_phone": s.caller_phone,
+        "current_state": s.current_state,
+        "last_debug": s.last_debug,
+        "active_sessions": len(sessions),
+    }
+
+
 @router.get("/charger/{charger_id}")
 def charger(charger_id: str) -> dict:
     data = synth_charger(charger_id)
@@ -62,3 +81,17 @@ async def reset() -> dict:
     call_session.reset_all()
     await bus.emit("reset", None, {})
     return {"ok": True}
+
+
+@router.post("/end_call")
+async def end_call_active() -> dict:
+    """End whatever call session is currently active. No-op if none."""
+    from backend.session import _sessions  # introspection
+    from backend.tools.actions import end_call as end_call_tool
+    sessions = sorted(_sessions.values(), key=lambda s: s.started_at, reverse=True)
+    if not sessions:
+        return {"ok": False, "reason": "no_active_session"}
+    s = sessions[0]
+    await end_call_tool(s)
+    call_session.end(s.session_id)
+    return {"ok": True, "session_id": s.session_id}
