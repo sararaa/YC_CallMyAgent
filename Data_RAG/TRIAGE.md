@@ -136,6 +136,41 @@ Set work order priority to **CRITICAL**. Do not continue troubleshooting.
 
 ---
 
+## Voice Agent Diagnosis Notes (per-charger telemetry)
+
+Once you have a **charger ID**, call `get_charger_telemetry(charger_id)` and locate the section titled **`## Voice Agent Diagnosis Notes`** at the end of that charger's summary file (`Data_RAG/{charger_id}_summary.md`). **Read and apply this section on every call where a charger is identified** — before finalizing tier classification, before attempting a soft reset, and before creating a work order.
+
+### What it is
+
+Each charger summary ends with a short, charger-specific playbook written from that unit's real fault history, session patterns, and known failure modes. It is more specific than the generic tier rules above.
+
+| Charger file | Diagnosis notes cover |
+|---|---|
+| `charger1_summary.md` | Proximity pilot / vehicle-side vs charger faults; DC:DC self-recovery; no live voltage telemetry |
+| `charger2_summary.md` | High fault history; Unavailable cycles; manual-reset escalation; Thu/Fri hardware-risk pattern |
+| `charger3_summary.md` | Cable/proximity faults; chronic Faulted state; module events; loose connector (875/860); isolation fault 318 → escalate, no retry |
+| `charger4_summary.md` | S3 button + proximity pilot (875/873) first; auth/RFID (824); HMI reboot (898); CPO link fallback; weekend connector/auth bias |
+| `charger5_summary.md` | Active AC:DC / contactor failure cluster (May 2026); do not treat as user-fixable |
+
+### How to use it
+
+1. **After** the caller gives a charger ID (or you infer it), fetch telemetry and scroll to `## Voice Agent Diagnosis Notes`.
+2. Match the caller's symptom to the closest bullet (e.g. "won't start", "session dropped", "screen on but no charge", "Unavailable").
+3. Let the notes **refine** your tier and next step:
+   - If notes say "escalate immediately" or "do not advise retry" → classify **Hardware** and skip soft reset.
+   - If notes say "likely vehicle-side" or "standard auth troubleshooting" → stay in **User** unless other signals contradict.
+   - If notes say "may self-recover, wait 2–3 minutes" → **Software** path (soft reset + wait) is appropriate unless safety signals are present.
+4. **Speak in plain language** — paraphrase the guidance; do not read the markdown section aloud.
+5. When diagnosis notes **conflict** with generic tier rules for this charger, **prefer the diagnosis notes** for that unit.
+
+### Do not skip
+
+- Do not diagnose from fault-code tables alone when diagnosis notes exist for the identified charger.
+- Do not invent charger-specific advice — if notes are missing from the file, fall back to the tier rules in this document.
+- For **charger5** during May 2026, diagnosis notes and the **CHARGER5 — SPECIAL CASE** section below both apply; treat them as reinforcing (hardware, no retry-first reset).
+
+---
+
 ## CHARGER5 — SPECIAL CASE FOR DEMO
 
 > ⚠️ As of May 2026, charger5 has an **active, unresolved hardware emergency**.
