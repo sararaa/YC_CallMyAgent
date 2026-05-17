@@ -71,19 +71,23 @@ function handle(evt: AnyVoltEvent): void {
 
     case "call_start": {
       const p = evt.payload;
-      // ChargePulse callStore expects (callId, callerId, chargerId). We use
-      // session_id as callId, caller_phone as callerId. chargerId is filled
-      // later when get_charger_telemetry fires.
       useCallStore.getState().startCall(p.session_id, p.caller_phone, "—");
       useGeminiStore.getState().reset();
       useOperatorStore.getState().reset();
+      useOperatorStore.getState().setCallActive(true);
       _toolIdToTool.clear();
       return;
     }
 
     case "call_end": {
       useCallStore.getState().endCall();
-      useOperatorStore.setState({ currentState: "ended", writeBackAt: performance.now() });
+      useOperatorStore.setState({ currentState: "ended", writeBackAt: performance.now(), callActive: false });
+      return;
+    }
+
+    case "state_focus": {
+      const p = evt.payload;
+      useOperatorStore.getState().setFocus(p.state, p.text);
       return;
     }
 

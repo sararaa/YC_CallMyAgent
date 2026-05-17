@@ -26,6 +26,7 @@ interface OperatorState {
   visited: Set<StateName>;
   eliminated: Set<StateName>;
   lastTransition: { from: StateName; to: StateName; reason: string | null; confidence: number | null; at: number } | null;
+  stateFocus: Partial<Record<StateName, string>>;
   toolStates: Record<ToolName, ToolFireState>;
   toolsAvailable: ToolName[];
   memory: { session: MemoryCard[]; knowledge: MemoryCard[]; long_term: MemoryCard[] };
@@ -35,11 +36,13 @@ interface OperatorState {
   artifacts: Artifact[];
   preloadAt: number | null;
   writeBackAt: number | null;
+  callActive: boolean;
 
   setState: (next: StateName) => void;
   visit: (s: StateName) => void;
   eliminate: (s: StateName) => void;
   setTransition: (from: StateName, to: StateName, reason: string | null, confidence: number | null) => void;
+  setFocus: (state: StateName, text: string) => void;
   setToolFire: (tool: ToolName, state: ToolFireState) => void;
   setToolsAvailable: (tools: ToolName[]) => void;
   pushMemory: (tier: MemoryTier, card: MemoryCard) => void;
@@ -50,6 +53,7 @@ interface OperatorState {
   pushArtifact: (a: Artifact) => void;
   markPreload: () => void;
   markWriteBack: () => void;
+  setCallActive: (active: boolean) => void;
   reset: () => void;
 }
 
@@ -59,14 +63,15 @@ const idleTools: Record<ToolName, ToolFireState> = ALL_TOOLS.reduce((acc, t) => 
 }, {} as Record<ToolName, ToolFireState>);
 
 const initial: Omit<OperatorState,
-  "setState" | "visit" | "eliminate" | "setTransition" | "setToolFire" | "setToolsAvailable" |
+  "setState" | "visit" | "eliminate" | "setTransition" | "setFocus" | "setToolFire" | "setToolsAvailable" |
   "pushMemory" | "pushLatency" | "setLastDecision" | "pushTranscript" | "patchTool" |
-  "pushArtifact" | "markPreload" | "markWriteBack" | "reset"
+  "pushArtifact" | "markPreload" | "markWriteBack" | "setCallActive" | "reset"
 > = {
   currentState: "greeting",
   visited: new Set<StateName>(["greeting"]),
   eliminated: new Set<StateName>(),
   lastTransition: null,
+  stateFocus: {},
   toolStates: { ...idleTools },
   toolsAvailable: ["advance_to_scoping"],
   memory: { session: [], knowledge: [], long_term: [] },
@@ -76,6 +81,7 @@ const initial: Omit<OperatorState,
   artifacts: [],
   preloadAt: null,
   writeBackAt: null,
+  callActive: false,
 };
 
 function cap<T>(arr: T[], n: number): T[] {
@@ -105,13 +111,19 @@ export const useOperatorStore = create<OperatorState>((set) => ({
         if (b !== to) eliminated.add(b);
       }
     }
+    const stateFocus = reason ? { ...st.stateFocus, [to]: reason } : st.stateFocus;
     return {
       currentState: to,
       visited,
       eliminated,
       lastTransition: { from, to, reason, confidence, at: performance.now() },
+      stateFocus,
     };
   }),
+
+  setFocus: (state, text) => set((st) => ({ stateFocus: { ...st.stateFocus, [state]: text } })),
+
+  setCallActive: (active) => set({ callActive: active }),
 
   setToolFire: (tool, state) => set((st) => ({ toolStates: { ...st.toolStates, [tool]: state } })),
 
@@ -138,5 +150,5 @@ export const useOperatorStore = create<OperatorState>((set) => ({
   markPreload: () => set({ preloadAt: performance.now() }),
   markWriteBack: () => set({ writeBackAt: performance.now() }),
 
-  reset: () => set({ ...initial, visited: new Set<StateName>(["greeting"]), eliminated: new Set<StateName>(), toolStates: { ...idleTools } }),
+  reset: () => set({ ...initial, visited: new Set<StateName>(["greeting"]), eliminated: new Set<StateName>(), toolStates: { ...idleTools }, stateFocus: {} }),
 }));

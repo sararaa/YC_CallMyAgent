@@ -3,8 +3,9 @@ import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, ClipboardList, ChevronDown, ChevronUp, Zap } from 'lucide-react'
 import { useWorkOrderStore } from '@/store/workOrderStore'
-import { TECHNICIANS } from '@/lib/mockData'
 import { urgencyBg, statusBg, statusLabel, formatDate } from '@/lib/utils'
+
+const TECHNICIANS = ['Alex Rivera', 'Jordan Kim', 'Sam Patel', 'Taylor Wong', 'Morgan Chen']
 
 export function WorkOrderModal() {
   const { showModal, closeModal, currentWO } = useWorkOrderStore()

@@ -28,9 +28,9 @@ export function Navbar() {
           <span className="font-bold text-lg tracking-tight gradient-text">ChargePulse</span>
         </Link>
 
-        {/* Demo badge */}
-        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold tracking-widest uppercase bg-amber-500/15 text-amber-400 border border-amber-500/30">
-          Demo Mode
+        {/* Live wire badge */}
+        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold tracking-widest uppercase bg-cyan-electric/15 text-cyan-electric border border-cyan-electric/30">
+          Volt · AgentPhone
         </span>
 
         <div className="flex-1" />
@@ -50,17 +50,6 @@ export function Navbar() {
           className={cn(
             'text-sm font-medium px-3 py-1.5 rounded-lg transition-colors',
             pathname === '/'
-              ? 'bg-white/10 text-white'
-              : 'text-slate-400 hover:text-white hover:bg-white/5'
-          )}
-        >
-          Call
-        </Link>
-        <Link
-          href="/dashboard"
-          className={cn(
-            'text-sm font-medium px-3 py-1.5 rounded-lg transition-colors',
-            pathname === '/dashboard'
               ? 'bg-white/10 text-white'
               : 'text-slate-400 hover:text-white hover:bg-white/5'
           )}

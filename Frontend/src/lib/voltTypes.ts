@@ -136,4 +136,5 @@ export type AnyVoltEvent =
   | { type: "tool_artifact"; session_id: string; timestamp: string; payload: Record<string, unknown> & { kind: string } }
   | { type: "work_order_created"; session_id: string; timestamp: string; payload: Record<string, unknown> }
   | { type: "gemini_analysis"; session_id: string; timestamp: string; payload: import("./types").GeminiResult }
+  | { type: "state_focus"; session_id: string; timestamp: string; payload: { state: StateName; text: string } }
   | { type: "reset"; session_id: null; timestamp: string; payload: Record<string, never> };

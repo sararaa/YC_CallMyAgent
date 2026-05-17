@@ -1,12 +1,14 @@
 'use client'
-import { motion } from 'framer-motion'
+import { useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { X } from 'lucide-react'
 import { useOperatorStore } from '@/store/operatorStore'
 import { STATE_EDGES, STATE_LAYOUT, STATE_SUFFIX, type StateName } from '@/lib/voltTypes'
 
 const VB_W = 1000
 const VB_H = 480
-const NODE_W = 132
-const NODE_H = 56
+const NODE_W = 168
+const NODE_H = 72
 
 type Status = 'pending' | 'active' | 'visited' | 'eliminated'
 
@@ -52,20 +54,21 @@ function curve(x1: number, y1: number, x2: number, y2: number): string {
 }
 
 export function StateGraph() {
-  const { currentState, visited, eliminated, lastTransition } = useOperatorStore()
+  const { currentState, visited, eliminated, lastTransition, stateFocus } = useOperatorStore()
+  const [selected, setSelected] = useState<StateName | null>(null)
 
   return (
-    <div className="glass rounded-xl panel-shadow flex flex-col h-full overflow-hidden">
+    <div className="glass rounded-xl panel-shadow flex flex-col h-full overflow-hidden relative">
       <div className="flex items-center gap-2.5 px-4 py-3 border-b border-white/[0.06] shrink-0">
         <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-cyan-electric/20 to-cyan-electric/10 flex items-center justify-center">
           <span className="text-cyan-electric text-[10px] font-bold tracking-widest">SM</span>
         </div>
         <div>
           <p className="text-sm font-semibold text-white">State Machine</p>
-          <p className="text-[10px] text-slate-500">Tool-gated · physically enforced</p>
+          <p className="text-[10px] text-slate-500">Tool-gated · click a node for details</p>
         </div>
       </div>
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 relative">
         <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="w-full h-full">
           <defs>
             <pattern id="hash" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
@@ -123,25 +126,93 @@ export function StateGraph() {
             const layout = STATE_LAYOUT[name]
             const [cx, cy] = px(layout.x, layout.y)
             const status = nodeStatus(name as StateName, currentState, visited, eliminated)
+            const focus = stateFocus[name as StateName] || ''
             return (
-              <Node key={name} cx={cx} cy={cy} label={layout.label} status={status} suffix={STATE_SUFFIX[name]} />
+              <Node
+                key={name}
+                cx={cx} cy={cy}
+                label={layout.label}
+                status={status}
+                focus={focus}
+                onClick={() => setSelected(name as StateName)}
+              />
             )
           })}
         </svg>
+
+        <AnimatePresence>
+          {selected && (
+            <NodeDetail
+              key={selected}
+              name={selected}
+              focus={stateFocus[selected] || ''}
+              status={nodeStatus(selected, currentState, visited, eliminated)}
+              onClose={() => setSelected(null)}
+            />
+          )}
+        </AnimatePresence>
       </div>
     </div>
   )
 }
 
-function Node({ cx, cy, label, status }: { cx: number; cy: number; label: string; status: Status; suffix: string }) {
+function NodeDetail({
+  name, focus, status, onClose,
+}: { name: StateName; focus: string; status: Status; onClose: () => void }) {
+  const label = STATE_LAYOUT[name as Exclude<StateName, 'ended'>]?.label || name
+  const suffix = STATE_SUFFIX[name as Exclude<StateName, 'ended'>] || ''
+  const accent =
+    status === 'active' ? 'border-cyan-electric/60 shadow-[0_0_30px_rgba(0,212,255,0.15)]' :
+    status === 'visited' ? 'border-cyan-electric/30' :
+    status === 'eliminated' ? 'border-white/[0.08] opacity-80' :
+    'border-white/[0.12]'
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.92, y: 12 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.95, y: 6 }}
+      transition={{ duration: 0.22, ease: [0.165, 0.84, 0.44, 1] }}
+      className={`absolute bottom-4 left-1/2 -translate-x-1/2 w-[min(640px,calc(100%-32px))] z-20 rounded-xl border bg-bg-base/95 backdrop-blur-md p-4 ${accent}`}
+    >
+      <button
+        onClick={onClose}
+        className="absolute top-2 right-2 text-slate-500 hover:text-white p-1 rounded-md hover:bg-white/[0.05]"
+      >
+        <X className="w-3.5 h-3.5" />
+      </button>
+      <div className="flex items-baseline gap-2 mb-2">
+        <span className="text-[10px] uppercase tracking-widest text-cyan-electric font-bold">{status}</span>
+        <h3 className="text-base font-semibold text-white">{label}</h3>
+      </div>
+      {focus && (
+        <div className="mb-3">
+          <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Current focus</p>
+          <p className="text-[13px] text-slate-100 leading-relaxed italic">"{focus}"</p>
+        </div>
+      )}
+      <div>
+        <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Stage instructions</p>
+        <p className="text-[12px] text-slate-300 leading-relaxed whitespace-pre-wrap">{suffix}</p>
+      </div>
+    </motion.div>
+  )
+}
+
+function Node({
+  cx, cy, label, status, focus, onClick,
+}: { cx: number; cy: number; label: string; status: Status; focus: string; onClick: () => void }) {
   const x = cx - NODE_W / 2
   const y = cy - NODE_H / 2
   const isActive = status === 'active'
+  const showFocus = focus && (isActive || status === 'visited')
+  const labelY = showFocus ? cy - 8 : cy + 5
+  const truncated = focus.length > 28 ? focus.slice(0, 27) + '…' : focus
   return (
-    <g>
+    <g onClick={onClick} style={{ cursor: 'pointer' }}>
       {isActive && (
         <motion.rect
-          x={x - 8} y={y - 8} width={NODE_W + 16} height={NODE_H + 16} rx={14}
+          x={x - 8} y={y - 8} width={NODE_W + 16} height={NODE_H + 16} rx={16}
           fill="#00d4ff" opacity={0.2}
           initial={{ opacity: 0.35, scale: 1 }}
           animate={{ opacity: 0, scale: 1.18 }}
@@ -150,14 +221,14 @@ function Node({ cx, cy, label, status }: { cx: number; cy: number; label: string
         />
       )}
       <motion.rect
-        x={x} y={y} width={NODE_W} height={NODE_H} rx={10}
+        x={x} y={y} width={NODE_W} height={NODE_H} rx={12}
         fill={NODE_FILL[status]} stroke={NODE_STROKE[status]} strokeWidth={isActive ? 3 : 2}
         strokeDasharray={status === 'eliminated' ? '5 4' : ''}
         animate={{ fill: NODE_FILL[status], stroke: NODE_STROKE[status] }}
         transition={{ duration: 0.4 }}
       />
       {status === 'eliminated' && (
-        <rect x={x} y={y} width={NODE_W} height={NODE_H} rx={10} fill="url(#hash)" />
+        <rect x={x} y={y} width={NODE_W} height={NODE_H} rx={12} fill="url(#hash)" />
       )}
       {status === 'visited' && (
         <g transform={`translate(${x + NODE_W - 16}, ${y + 12})`}>
@@ -165,9 +236,14 @@ function Node({ cx, cy, label, status }: { cx: number; cy: number; label: string
           <path d="M -3 0 L -1 2.2 L 3 -2.5" stroke="#0a0a0f" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
         </g>
       )}
-      <text x={cx} y={cy + 5} textAnchor="middle" fontSize="14" fontWeight={isActive ? 600 : 500} fill={NODE_TEXT[status]}>
+      <text x={cx} y={labelY} textAnchor="middle" fontSize="14" fontWeight={isActive ? 600 : 500} fill={NODE_TEXT[status]}>
         {label}
       </text>
+      {showFocus && (
+        <text x={cx} y={cy + 12} textAnchor="middle" fontSize="10" fontStyle="italic" fill={isActive ? '#00d4ff' : '#94a3b8'} opacity={0.85}>
+          {truncated}
+        </text>
+      )}
     </g>
   )
 }

@@ -6,10 +6,10 @@ import { motion } from 'framer-motion'
 import { ArrowLeft, ClipboardList, Zap } from 'lucide-react'
 import { WorkOrder } from '@/lib/types'
 import { WorkOrderTimeline } from '@/components/workorders/WorkOrderTimeline'
-import { UsageGraph } from '@/components/charger/UsageGraph'
 import { urgencyBg, statusBg, statusLabel, formatDate } from '@/lib/utils'
-import { MOCK_CHARGERS, TECHNICIANS } from '@/lib/mockData'
 import { Skeleton } from '@/components/ui/LoadingSkeleton'
+
+const TECHNICIANS = ['Alex Rivera', 'Jordan Kim', 'Sam Patel', 'Taylor Wong', 'Morgan Chen']
 
 export default function WorkOrderDetail() {
   const { id } = useParams<{ id: string }>()
@@ -22,8 +22,6 @@ export default function WorkOrderDetail() {
       .then((r) => r.json())
       .then((data) => { setWo(data); setLoading(false) })
   }, [id])
-
-  const charger = wo ? MOCK_CHARGERS.find((c) => c.id === wo.chargerId) : null
 
   if (loading) {
     return (
@@ -154,14 +152,6 @@ export default function WorkOrderDetail() {
               <p className="text-xs uppercase tracking-wider text-slate-500 mb-4">Timeline</p>
               <WorkOrderTimeline events={wo.timeline} />
             </div>
-
-            {/* Usage graph */}
-            {charger && (
-              <div className="glass rounded-xl p-5">
-                <p className="text-xs uppercase tracking-wider text-slate-500 mb-3">Usage History — {wo.chargerId}</p>
-                <UsageGraph data={charger.usageHistory} />
-              </div>
-            )}
           </div>
         </div>
       </motion.div>
