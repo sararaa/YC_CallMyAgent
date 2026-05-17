@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import { WorkOrder } from '@/lib/types'
-import { MOCK_WORK_ORDERS } from '@/lib/mockData'
 
 interface WorkOrderStore {
   currentWO: WorkOrder | null
@@ -17,7 +16,7 @@ interface WorkOrderStore {
 
 export const useWorkOrderStore = create<WorkOrderStore>((set) => ({
   currentWO: null,
-  workOrders: MOCK_WORK_ORDERS,
+  workOrders: [],
   showModal: false,
   showToast: false,
 

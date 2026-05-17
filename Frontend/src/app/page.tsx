@@ -5,103 +5,61 @@ import { GeminiPanel } from '@/components/panels/GeminiPanel'
 import { CallPanel } from '@/components/panels/CallPanel'
 import { ChargerPanel } from '@/components/panels/ChargerPanel'
 import { useCallStore } from '@/store/callStore'
-import { useGeminiStore } from '@/store/geminiStore'
 import { useChargerStore } from '@/store/chargerStore'
-import { useWorkOrderStore } from '@/store/workOrderStore'
 import { Brain, MessageSquare, Cpu } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 type Tab = 'gemini' | 'call' | 'charger'
 
+/**
+ * Root view ("ChargePulse"): 3-panel live call dashboard.
+ *
+ * Data flow: this page kicks off a scripted demo call via /api/call/start
+ * (which forwards to the Python backend's /simulate endpoint). All subsequent
+ * state — transcript, Gemini fault analysis, work order — arrives over the
+ * dashboard WebSocket and is fanned into the relevant Zustand stores by the
+ * <WsBridge /> mounted in layout.tsx. This page just consumes the stores.
+ */
 export default function Dashboard() {
-  const { startCall, endCall, addMessage, updateLastMessage, tickDuration } = useCallStore()
-  const gemini = useGeminiStore()
-  const { setActiveCharger } = useChargerStore()
-  const { setCurrentWO, addWorkOrder, showToastNotification } = useWorkOrderStore()
+  const { tickDuration, status, chargerId } = useCallStore()
+  const { setActiveCharger, activeCharger } = useChargerStore()
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [activeTab, setActiveTab] = useState<Tab>('call')
   const started = useRef(false)
 
+  // Trigger the demo call once on mount.
   useEffect(() => {
     if (started.current) return
     started.current = true
+    fetch('/api/call/start', { method: 'POST' }).catch((e) =>
+      console.error('failed to start demo call', e)
+    )
+  }, [])
 
-    async function runDemo() {
-      await new Promise((r) => setTimeout(r, 800))
+  // Once the agent pulls telemetry, WsBridge updates callStore.chargerId.
+  // Fetch the synthesized charger record from Python and populate the right panel.
+  useEffect(() => {
+    if (!chargerId || chargerId === '—' || chargerId.startsWith('pending')) return
+    if (activeCharger && activeCharger.id === chargerId.toLowerCase()) return
+    fetch(`/api/charger/${chargerId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data && !data.error) setActiveCharger(data) })
+      .catch(() => { /* ignore */ })
+  }, [chargerId, activeCharger, setActiveCharger])
 
-      const callRes = await fetch('/api/call/start', { method: 'POST' })
-      const callData = await callRes.json()
-      startCall(callData.callId, callData.callerId, callData.chargerId)
-
-      const chargerRes = await fetch(`/api/charger/${callData.chargerId}`)
-      const chargerData = await chargerRes.json()
-      setActiveCharger(chargerData)
-
+  // Local duration ticker while the call is active. The Python backend
+  // doesn't push per-second events — this is purely UI.
+  useEffect(() => {
+    if (status === 'active' && !timerRef.current) {
       timerRef.current = setInterval(() => tickDuration(), 1000)
-
-      addMessage({ id: 'sys-connect', role: 'system', text: `Call connected · ${callData.callerId} · ${callData.chargerId}`, timestamp: new Date() })
-
-      // Stream transcript
-      const es = new EventSource('/api/call/transcript')
-      const messageMap = new Map<string, string>()
-
-      await new Promise<void>((resolve) => {
-        es.onmessage = (event) => {
-          const data = JSON.parse(event.data)
-          if (data.type === 'message_start') {
-            messageMap.set(data.messageId, '')
-            addMessage({ id: data.messageId, role: 'caller', text: '', timestamp: new Date(), isStreaming: true })
-          } else if (data.type === 'word') {
-            const current = (messageMap.get(data.messageId) || '') + data.word
-            messageMap.set(data.messageId, current)
-            updateLastMessage(data.messageId, current)
-          } else if (data.type === 'call_ended') {
-            es.close()
-            resolve()
-          }
-        }
-        es.onerror = () => { es.close(); resolve() }
-      })
-
-      endCall()
-      if (timerRef.current) clearInterval(timerRef.current)
-      addMessage({ id: 'sys-end', role: 'system', text: 'Call ended · Generating analysis...', timestamp: new Date() })
-
-      // Gemini analysis
-      await new Promise((r) => setTimeout(r, 600))
-      gemini.startThinking()
-
-      const geminiRes = await fetch('/api/gemini/analyze', { method: 'POST' })
-      const reader = geminiRes.body!.getReader()
-      const dec = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += dec.decode(value, { stream: true })
-        const lines = buffer.split('\n\n')
-        buffer = lines.pop() || ''
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const parsed = JSON.parse(line.slice(6))
-          if (parsed.type === 'thinking_chunk') gemini.appendThinking(parsed.text)
-          else if (parsed.type === 'result') gemini.setComplete(parsed.data)
-        }
-      }
-
-      // Generate work order
-      await new Promise((r) => setTimeout(r, 500))
-      const woRes = await fetch('/api/workorder/generate', { method: 'POST' })
-      const woData = await woRes.json()
-      addWorkOrder(woData)
-      setCurrentWO(woData)
-      showToastNotification()
     }
-
-    runDemo()
-    return () => { if (timerRef.current) clearInterval(timerRef.current) }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    if (status !== 'active' && timerRef.current) {
+      clearInterval(timerRef.current); timerRef.current = null
+    }
+    return () => {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
+    }
+  }, [status, tickDuration])
 
   const TABS = [
     { id: 'gemini' as Tab, label: 'Analysis', Icon: Brain },

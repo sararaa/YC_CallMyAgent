@@ -54,7 +54,18 @@ export function Navbar() {
               : 'text-slate-400 hover:text-white hover:bg-white/5'
           )}
         >
-          Dashboard
+          Call
+        </Link>
+        <Link
+          href="/dashboard"
+          className={cn(
+            'text-sm font-medium px-3 py-1.5 rounded-lg transition-colors',
+            pathname === '/dashboard'
+              ? 'bg-white/10 text-white'
+              : 'text-slate-400 hover:text-white hover:bg-white/5'
+          )}
+        >
+          Operator
         </Link>
         <Link
           href="/work-orders"

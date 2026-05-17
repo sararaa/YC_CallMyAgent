@@ -1,40 +1,60 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { MOCK_WORK_ORDERS } from '@/lib/mockData'
-import { WOStatus } from '@/lib/types'
+/**
+ * GET /api/workorders — proxies to Python /api/admin/work_orders, adapting
+ * the schema to the ChargePulse WorkOrder shape and applying client-style
+ * search/status filtering and pagination.
+ */
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
-export async function GET(req: NextRequest) {
-  const { searchParams } = req.nextUrl
-  const search = searchParams.get('search')?.toLowerCase() || ''
-  const status = searchParams.get('status') || 'all'
-  const page = parseInt(searchParams.get('page') || '1')
-  const limit = parseInt(searchParams.get('limit') || '20')
-  const sort = searchParams.get('sort') || 'newest'
+function toFrontendWO(r: Record<string, unknown>): Record<string, unknown> {
+  const sev = String(r.severity || "low");
+  const urgency =
+    sev === "critical" || sev === "high" ? "P1" :
+    sev === "medium" ? "P2" : "P3";
+  const statusMap: Record<string, string> = {
+    open: "open", in_progress: "dispatched", resolved: "resolved",
+  };
+  const created = (r.created_at as string) || new Date().toISOString();
+  const id = r.id as number;
+  return {
+    id: `wo-${id}`,
+    woNumber: `WO-${new Date(created).getFullYear()}-${String(id).padStart(4, "0")}`,
+    date: created,
+    chargerId: r.charger_id,
+    location: `Volt Network · ${String(r.charger_id || "").toUpperCase()} pad`,
+    customerName: "—",
+    faultCode: "—",
+    urgency,
+    status: statusMap[String(r.status || "open")] || "open",
+    assignedTech: null,
+    summary: r.symptoms,
+    parts: [],
+    timeline: [{ event: "Work order created", timestamp: created }],
+    reason: r.reason,
+    confidence: r.confidence,
+  };
+}
 
-  let orders = [...MOCK_WORK_ORDERS]
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const search = (url.searchParams.get("search") || "").toLowerCase();
+  const status = url.searchParams.get("status");
+  const page = parseInt(url.searchParams.get("page") || "1", 10);
+  const limit = parseInt(url.searchParams.get("limit") || "20", 10);
 
-  if (search) {
-    orders = orders.filter(
-      (wo) =>
-        wo.woNumber.toLowerCase().includes(search) ||
-        wo.chargerId.toLowerCase().includes(search) ||
-        wo.customerName.toLowerCase().includes(search) ||
-        wo.faultCode.toLowerCase().includes(search)
-    )
+  try {
+    const res = await fetch(`${BACKEND}/api/admin/work_orders`, { cache: "no-store" });
+    const rows = (await res.json()) as Record<string, unknown>[];
+    let orders = rows.map(toFrontendWO);
+    if (search) {
+      orders = orders.filter((o) => JSON.stringify(o).toLowerCase().includes(search));
+    }
+    if (status && status !== "all") {
+      orders = orders.filter((o) => o.status === status);
+    }
+    const total = orders.length;
+    const start = (page - 1) * limit;
+    return Response.json({ orders: orders.slice(start, start + limit), total, page, limit });
+  } catch (e) {
+    return Response.json({ orders: [], total: 0, page, limit, error: String(e) }, { status: 502 });
   }
-
-  if (status !== 'all') {
-    orders = orders.filter((wo) => wo.status === (status as WOStatus))
-  }
-
-  orders.sort((a, b) => {
-    if (sort === 'newest') return new Date(b.date).getTime() - new Date(a.date).getTime()
-    if (sort === 'oldest') return new Date(a.date).getTime() - new Date(b.date).getTime()
-    const urgencyOrder = { P1: 0, P2: 1, P3: 2, P4: 3 }
-    return urgencyOrder[a.urgency] - urgencyOrder[b.urgency]
-  })
-
-  const total = orders.length
-  const paginated = orders.slice((page - 1) * limit, page * limit)
-
-  return NextResponse.json({ orders: paginated, total, page, limit })
 }

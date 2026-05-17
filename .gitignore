@@ -1,0 +1,27 @@
+# Env
+.env
+.env.local
+.env.*.local
+
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# DB
+backend/db/*.db
+backend/db/*.db-journal
+
+# Dev artifacts
+dev/
+
+# Node / Next
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/.turbo/
+
+# OS
+.DS_Store
