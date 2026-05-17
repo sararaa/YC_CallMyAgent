@@ -1,0 +1,9 @@
+{
+  "type": "module",
+  "scripts": {
+    "ingest": "node ingest_pdfs.js"
+  },
+  "dependencies": {
+    "supermemory": "^4.21.1"
+  }
+}
