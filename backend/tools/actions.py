@@ -65,6 +65,66 @@ async def send_remote_command(
     return {"command_id": cid, "status": "queued"}
 
 
+def _read_charger_summary_excerpt(charger_id: str) -> str:
+    """Direct read of Data_RAG/{charger_id}_summary.md. Returns a trimmed
+    excerpt suitable for embedding in a work order, or '' if no file."""
+    from backend import config as _config
+    cid = (charger_id or "").strip().lower()
+    path = _config.DATA_RAG_DIR / f"{cid}_summary.md"
+    if not path.exists():
+        return ""
+    try:
+        text = path.read_text()
+    except Exception:  # noqa: BLE001
+        return ""
+    # Take the Overview + key tables (first ~2000 chars usually covers it),
+    # but cut at a section boundary if we can.
+    excerpt = text[:2200]
+    cutoff = excerpt.rfind("\n---")
+    if cutoff > 500:
+        excerpt = excerpt[:cutoff].rstrip()
+    return excerpt.strip()
+
+
+async def _enrich_with_kb(symptoms: str, charger_id: str) -> str:
+    """Build a rich details block for the work order. Combines:
+      - The charger's own summary.md excerpt (direct file read, fast & reliable)
+      - Top Moss volt-kb chunks matching the symptoms (best-effort; if Moss is
+        503 or returns nothing, we still have the summary excerpt)
+    """
+    parts: list[str] = []
+
+    # 1. Charger-specific telemetry from the markdown file
+    summary = _read_charger_summary_excerpt(charger_id)
+    if summary:
+        parts.append(f"## Charger telemetry summary — {charger_id}\n{summary}")
+
+    # 2. KB matches (TRIAGE.md, KB-* PDFs, etc) keyed on the symptoms
+    try:
+        from backend import config as _config
+        from backend.memory import moss_client as _moss
+        query = f"{symptoms} {charger_id}".strip()
+        res = await _moss.query(_config.VOLT_KB_INDEX, query, top_k=4)
+    except Exception:  # noqa: BLE001
+        res = None
+
+    if res and res.hits:
+        kb_lines = ["## Relevant knowledge base"]
+        for h in res.hits[:3]:
+            source = h.source or "kb"
+            # Skip the charger's own summary — we already included it above
+            if charger_id and source.startswith(f"{charger_id}_summary"):
+                continue
+            body = (h.text or "").strip().replace("\n\n", "\n")
+            if len(body) > 700:
+                body = body[:700].rsplit(" ", 1)[0] + "…"
+            kb_lines.append(f"\n### {source}  (score {h.score:.2f})\n{body}")
+        if len(kb_lines) > 1:
+            parts.append("\n".join(kb_lines))
+
+    return "\n\n".join(parts)
+
+
 async def create_work_order(
     s: CallSession,
     charger_id: str,
@@ -78,13 +138,23 @@ async def create_work_order(
     confidence = _clamp(confidence)
     if confidence is not None:
         s.confidence_samples.append(confidence)
+
+    # Enrich the work order with relevant KB context so the details section
+    # carries the same guidance the technician would otherwise have to look up.
+    kb_block = await _enrich_with_kb(symptoms, charger_id)
+    enriched_telemetry = telemetry_snippet or ""
+    if kb_block:
+        enriched_telemetry = (
+            f"{enriched_telemetry}\n\n{kb_block}" if enriched_telemetry else kb_block
+        ).strip()
+
     with get_session() as db:
         wo = models.WorkOrder(
             session_id=s.session_id,
             charger_id=charger_id,
             severity=severity,
             symptoms=symptoms,
-            telemetry_snippet=telemetry_snippet,
+            telemetry_snippet=enriched_telemetry,
             reason=reason,
             confidence=confidence,
         )

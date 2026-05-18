@@ -30,35 +30,40 @@ async def recall_session(s: CallSession, query: str) -> dict:
 
 
 async def recall_knowledge(s: CallSession, query: str) -> dict:
-    """Cache-aside: query Moss volt-kb first, fall through to Supermemory on miss."""
+    """Cache-aside: query Moss volt-kb first, fall through to Supermemory on miss.
+
+    Behaviour:
+      - ALWAYS emit whatever Moss returned to the knowledge lane (even weak hits),
+        so the UI reflects what was actually found.
+      - Consider a query "strong" if any score >= threshold. Only then return
+        knowledge-only; otherwise also query Supermemory as a fallback so the
+        agent has more options.
+      - Threshold is intentionally lenient — real Moss MiniLM scores are often
+        in the 0.2-0.4 range even for relevant hits.
+    """
     t = time.perf_counter()
     res = await moss_client.query(config.VOLT_KB_INDEX, query, top_k=5)
     duration_ms = (time.perf_counter() - t) * 1000
 
-    # "Strong" hit = at least one match with score >= 0.3 (token-overlap stub
-    # gives lower scores than the real embedding-based Moss). Tune per env.
-    threshold = 0.15 if config.using_moss_stub() else 0.5
+    threshold = 0.15 if config.using_moss_stub() else 0.25
+    moss_results = [{"text": h.text, "source": h.source, "score": h.score} for h in res.hits]
     strong = res.hit and any(h.score >= threshold for h in res.hits)
 
-    if strong:
-        results = [{"text": h.text, "source": h.source, "score": h.score} for h in res.hits]
-        payload = {
-            "tier": "knowledge",
-            "query": query,
-            "results": results,
-            "duration_ms": duration_ms,
-            "hit": True,
-        }
-        await bus.emit("memory_query", s.session_id, payload)
-        await bus.emit("latency_sample", s.session_id, {"component": "moss_kb", "ms": duration_ms})
-        return {"results": results, "latency_ms": duration_ms, "hit": True, "tier": "knowledge"}
-
-    # MISS — fall through to Supermemory (long-term)
+    # Always emit knowledge with the real results (don't show "no match" if
+    # we actually got back partial hits).
     await bus.emit("memory_query", s.session_id, {
-        "tier": "knowledge", "query": query, "results": [], "duration_ms": duration_ms, "hit": False,
+        "tier": "knowledge",
+        "query": query,
+        "results": moss_results,
+        "duration_ms": duration_ms,
+        "hit": bool(moss_results),
     })
     await bus.emit("latency_sample", s.session_id, {"component": "moss_kb", "ms": duration_ms})
 
+    if strong:
+        return {"results": moss_results, "latency_ms": duration_ms, "hit": True, "tier": "knowledge"}
+
+    # Weak or no hit — also try Supermemory as a fallback
     t2 = time.perf_counter()
     sm = await supermemory_client.search(query, container_tag=s.caller_phone, top_k=5)
     sm_ms = (time.perf_counter() - t2) * 1000
@@ -68,6 +73,9 @@ async def recall_knowledge(s: CallSession, query: str) -> dict:
     })
     await bus.emit("latency_sample", s.session_id, {"component": "supermemory", "ms": sm_ms})
 
+    # Return whichever side had results, preferring knowledge if it had anything.
+    if moss_results:
+        return {"results": moss_results, "latency_ms": duration_ms, "hit": True, "tier": "knowledge", "weak": True}
     return {"results": sm_results, "latency_ms": sm_ms, "hit": sm.hit, "tier": "long_term"}
 
 

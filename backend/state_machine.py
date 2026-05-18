@@ -41,7 +41,17 @@ STATES = {
         "tools": ["advance_to_scoping"],
     },
     "scoping": {
-        "suffix": "STAGE: Problem scoping. Understand the problem in plain language. Ask 1-2 focused clarifying questions. Don't diagnose yet. When you can categorize the issue, call advance_to_triage.",
+        "suffix": (
+            "STAGE: Problem scoping. Your job is to UNDERSTAND, not yet decide.\n"
+            "Before calling advance_to_triage you MUST have these from the caller:\n"
+            "  1. What specifically isn't working (the symptom in their own words).\n"
+            "  2. The charger ID, location, OR a description that narrows the unit down.\n"
+            "  3. Anything they've already tried (replugging, restarting the app, switching ports, etc).\n"
+            "Ask one question at a time. Take TWO TO THREE clarifying exchanges minimum.\n"
+            "Do NOT diagnose, do NOT guess the category, do NOT advance until you have"
+            " concrete answers to the three points above. If the caller is vague, ask again.\n"
+            "Only when you have a real, specific picture, call advance_to_triage."
+        ),
         "tools": ["recall_session", "advance_to_triage"],
     },
     "triage": {

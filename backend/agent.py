@@ -73,8 +73,20 @@ async def run_turn(s: CallSession, user_text: str) -> str:
 
     _record_turn(s, "user", [{"text": user_text}])
 
-    # Loop until model returns a plain-text reply (no more function calls queued)
-    for hop in range(8):  # safety cap
+    # Loop until model returns a plain-text reply (no more function calls queued).
+    # Tools whose result the model genuinely needs to see before forming its
+    # reply. Transition tools (advance_to_*, route_to_*) don't qualify — they
+    # only change the next turn's tool set, and the model already produced
+    # reply text alongside them, so we short-circuit and avoid an extra Gemini
+    # round-trip per webhook. Big latency win.
+    NEEDS_RESPONSE_LOOP = {
+        "recall_session", "recall_knowledge",
+        "get_charger_telemetry",
+        "send_remote_command", "create_work_order",
+        "generate_report",
+    }
+
+    for hop in range(4):  # safety cap (reduced from 8 — most turns finish in 1-2)
         tools = tools_for_state(s.current_state)
         sys = system_prompt(s.current_state)
         history = _serialize_history(s)
@@ -96,6 +108,12 @@ async def run_turn(s: CallSession, user_text: str) -> str:
                     system_instruction=sys,
                     tools=tools,
                     temperature=0.4,
+                    # CRITICAL: google-genai's Automatic Function Calling tries
+                    # to execute function calls locally by looking for Python
+                    # callables in `tools`. We pass plain dicts (function
+                    # declarations), so AFC silently strips the response and
+                    # we get candidates_tokens=None. Disable it.
+                    automatic_function_calling=gtypes.AutomaticFunctionCallingConfig(disable=True),
                 ),
             )
         except Exception as e:  # noqa: BLE001
@@ -200,7 +218,26 @@ async def run_turn(s: CallSession, user_text: str) -> str:
                     return reply
 
             _record_turn(s, "user", tool_response_parts)
-            # Loop: send tool responses back to Gemini to get a follow-up
+
+            # Short-circuit: if every tool the model called was a pure
+            # transition / state-change tool, the model has already produced
+            # the reply text and there's no value re-calling Gemini just to
+            # acknowledge the transition. Send the existing text now; the
+            # next webhook will be in the new state.
+            called = {fc.name for fc in function_calls}
+            needs_followup = bool(called & NEEDS_RESPONSE_LOOP)
+            if not needs_followup and text_chunks:
+                reply = " ".join(text_chunks).strip()
+                if not reply:
+                    reply = _filler_for_state(s.current_state)
+                try:
+                    await memory_tool.append_turn(s, "agent", reply)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("append_turn agent (short-circuit) failed: %s", e)
+                await bus.emit("transcript", s.session_id, {"role": "agent", "text": reply})
+                return reply
+
+            # Otherwise loop: send tool responses back to Gemini for a follow-up
             continue
 
         # No tool calls — we have a user-facing reply

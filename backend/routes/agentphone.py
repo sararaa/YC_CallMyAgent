@@ -183,13 +183,30 @@ async def _handle_agentphone_webhook(request: Request) -> dict:
     if not transcript:
         return {"text": ""}
     async with s.lock:
-        # De-dup: AgentPhone re-delivers the same utterance after disconnect
-        if transcript == s.last_caller_utterance:
-            log.info("dedup: identical utterance re-delivered, skipping")
-            return {"text": ""}
-        s.last_caller_utterance = transcript
         if s.call_ended:
             return {"text": ""}
+        # AgentPhone sends INCREMENTAL ASR updates: the same utterance grows
+        # word-by-word across multiple webhooks. We only want to process the
+        # FINAL transcription. Treat any new utterance that starts with the
+        # previous one (or is fully contained in it) as a growing update and
+        # skip — the model is still receiving the longer version on the next
+        # webhook anyway. Also catches exact-duplicate re-deliveries.
+        prev = s.last_caller_utterance
+        if prev:
+            if transcript == prev:
+                log.info("dedup: identical utterance re-delivered, skipping")
+                return {"text": ""}
+            if transcript.startswith(prev) or prev.startswith(transcript):
+                log.info(
+                    "dedup: interim ASR update (prev=%d ch, now=%d ch), skipping",
+                    len(prev), len(transcript),
+                )
+                # Update so the LONGEST version is what we eventually process
+                s.last_caller_utterance = (
+                    transcript if len(transcript) > len(prev) else prev
+                )
+                return {"text": ""}
+        s.last_caller_utterance = transcript
         reply = await run_turn(s, transcript)
     return {"text": reply}
 

@@ -100,6 +100,18 @@ export default function WorkOrderDetail() {
               </div>
             </div>
 
+            {/* Telemetry + KB context — populated server-side from Moss volt-kb */}
+            {(wo as unknown as { details?: string }).details && (
+              <div className="glass rounded-xl p-5">
+                <p className="text-xs uppercase tracking-wider text-slate-500 mb-3">
+                  Telemetry &amp; Knowledge Base Context
+                </p>
+                <pre className="text-[12px] text-slate-300 leading-relaxed whitespace-pre-wrap font-sans">
+{(wo as unknown as { details: string }).details}
+                </pre>
+              </div>
+            )}
+
             {/* Parts */}
             {wo.parts.length > 0 && (
               <div className="glass rounded-xl p-5">

@@ -157,7 +157,14 @@ DECLARATIONS: dict[str, dict] = {
     },
     "advance_to_triage": {
         "name": "advance_to_triage",
-        "description": "Transition to the triage stage. The `reason` should describe WHAT YOU NEED TO DECIDE next — the specific user vs software vs hardware question this caller's problem raises.",
+        "description": (
+            "Transition to the triage stage. PRECONDITION: you must have already gathered "
+            "(a) what specifically isn't working, (b) the charger ID or location, and "
+            "(c) what the caller has already tried. If any of those three are missing, "
+            "ask another clarifying question instead of calling this tool. "
+            "The `reason` should describe WHAT YOU NEED TO DECIDE next — the specific "
+            "user vs software vs hardware question this caller's problem raises."
+        ),
         "parameters": {
             "type": "object",
             "properties": {"reason": {

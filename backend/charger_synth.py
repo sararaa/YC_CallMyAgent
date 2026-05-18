@@ -146,6 +146,7 @@ def _wo_to_frontend(wo: models.WorkOrder) -> dict:
         # Volt-specific extras (extra fields are harmless to the frontend)
         "reason": wo.reason,
         "confidence": wo.confidence,
+        "details": wo.telemetry_snippet or "",  # KB-enriched context block
     }
 
 
