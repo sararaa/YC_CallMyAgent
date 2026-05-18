@@ -28,14 +28,14 @@ async def lifespan(_: FastAPI):
         log.warning("GEMINI_API_KEY not set — agent turns will fail until populated.")
     # Prune orphan session indexes from prior runs (Moss free tier caps at 3).
     try:
-        from backend.memory.moss_client import prune_orphan_sessions, list_indexes
+        from backend.memory.moss_client import prune_orphan_sessions
         await prune_orphan_sessions()
-        # Auto-build volt-kb if it doesn't exist yet (stub mode always, real
-        # mode only on first boot).
-        indexes = await list_indexes()
-        if config.VOLT_KB_INDEX not in indexes:
-            n = await build_volt_kb()
-            log.info("volt-kb built with %d chunks", n)
+        # ALWAYS rebuild volt-kb on startup so any new Data_RAG files
+        # (e.g. howto.md added since the last boot) get indexed. build_volt_kb
+        # deletes the existing index first, then recreates from the current
+        # Data_RAG directory.
+        n = await build_volt_kb()
+        log.info("volt-kb rebuilt with %d chunks", n)
     except Exception as e:  # noqa: BLE001
         log.warning("startup moss bootstrap failed: %s", e)
     yield

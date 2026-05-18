@@ -20,6 +20,12 @@ class CallSession:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     # Deduplicate identical caller utterances re-delivered by AgentPhone.
     last_caller_utterance: str = ""
+    # The AgentPhone callId for this call. Used to ignore stale call_ended
+    # webhooks that match by phone number but belong to a DIFFERENT call.
+    agentphone_call_id: str = ""
+    # Signals when the Moss session index has been created. Background
+    # writes (append_turn, preload) await this before touching Moss.
+    index_ready: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 _sessions: dict[str, CallSession] = {}

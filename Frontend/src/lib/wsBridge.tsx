@@ -53,29 +53,42 @@ export function WsBridge() {
 }
 
 let _toolIdToTool = new Map<string, ToolName>();
+let _currentSessionId: string | null = null;
+
+function _resetAllStores() {
+  useCallStore.getState().reset();
+  useGeminiStore.getState().reset();
+  useWorkOrderStore.setState({ currentWO: null, workOrders: [], showModal: false, showToast: false });
+  useChargerStore.setState({ activeCharger: null });
+  useOperatorStore.getState().reset();
+  _toolIdToTool.clear();
+}
 
 function handle(evt: AnyVoltEvent): void {
+  // Whenever a new session_id appears that's different from what we're
+  // tracking, blow away any stale UI state from a prior call BEFORE
+  // processing the event. Prevents the "old caller bubble lingers,
+  // vanishes, then reappears" flicker.
+  const sid = evt.session_id ?? null;
+  if (sid && sid !== _currentSessionId) {
+    _resetAllStores();
+    _currentSessionId = sid;
+  }
+
   switch (evt.type) {
     case "hello":
       return;
 
     case "reset": {
-      useCallStore.getState().reset();
-      useGeminiStore.getState().reset();
-      useWorkOrderStore.setState({ currentWO: null, workOrders: [], showModal: false, showToast: false });
-      useChargerStore.setState({ activeCharger: null });
-      useOperatorStore.getState().reset();
-      _toolIdToTool.clear();
+      _resetAllStores();
+      _currentSessionId = null;
       return;
     }
 
     case "call_start": {
       const p = evt.payload;
       useCallStore.getState().startCall(p.session_id, p.caller_phone, "—");
-      useGeminiStore.getState().reset();
-      useOperatorStore.getState().reset();
       useOperatorStore.getState().setCallActive(true);
-      _toolIdToTool.clear();
       return;
     }
 

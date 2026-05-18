@@ -79,15 +79,29 @@ async def recall_knowledge(s: CallSession, query: str) -> dict:
     return {"results": sm_results, "latency_ms": sm_ms, "hit": sm.hit, "tier": "long_term"}
 
 
-async def append_turn(s: CallSession, role: str, text: str) -> None:
-    """Append a turn to the session Moss index and emit memory_ingest."""
-    doc_id = f"{s.session_id}-{uuid.uuid4().hex[:8]}"
+import asyncio
+
+
+async def _append_turn_bg(s: CallSession, role: str, text: str, doc_id: str) -> None:
+    """Background worker for append_turn. Waits for the session Moss index
+    to exist before writing so we never hit 'Index not found' races."""
+    try:
+        await s.index_ready.wait()
+    except Exception:  # noqa: BLE001
+        return
+    if s.call_ended:
+        return
     t = time.perf_counter()
-    await moss_client.add_docs(_session_index(s), [{
-        "id": doc_id,
-        "text": text,
-        "metadata": {"role": role, "session_id": s.session_id, "source": role},
-    }])
+    try:
+        await moss_client.add_docs(_session_index(s), [{
+            "id": doc_id,
+            "text": text,
+            "metadata": {"role": role, "session_id": s.session_id, "source": role},
+        }])
+    except Exception as e:  # noqa: BLE001
+        log = __import__("logging").getLogger("volt.memory")
+        log.warning("append_turn write failed for %s: %s", doc_id, e)
+        return
     duration_ms = (time.perf_counter() - t) * 1000
     await bus.emit("memory_ingest", s.session_id, {
         "tier": "session",
@@ -95,3 +109,10 @@ async def append_turn(s: CallSession, role: str, text: str) -> None:
         "text_preview": text[:80],
         "latency_ms": duration_ms,
     })
+
+
+async def append_turn(s: CallSession, role: str, text: str) -> None:
+    """Schedule a session-memory write in the background. Returns immediately
+    so the agent's turn loop isn't blocked by Moss latency."""
+    doc_id = f"{s.session_id}-{uuid.uuid4().hex[:8]}"
+    asyncio.create_task(_append_turn_bg(s, role, text, doc_id))

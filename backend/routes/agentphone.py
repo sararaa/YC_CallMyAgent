@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from difflib import SequenceMatcher
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -52,9 +53,24 @@ log = logging.getLogger("volt.agentphone")
 router = APIRouter()
 
 
+async def _init_moss_session(s) -> None:
+    """Background: create the Moss session index and signal readiness.
+    We set index_ready even on failure so dependent writes don't hang forever."""
+    try:
+        await moss_client.create_index(f"session-{s.session_id}", [{
+            "id": f"{s.session_id}-init",
+            "text": f"Call started with {s.caller_phone}",
+            "metadata": {"source": "system"},
+        }])
+    except Exception as e:  # noqa: BLE001
+        log.warning("Moss create_index for session %s failed: %s", s.session_id, e)
+    finally:
+        s.index_ready.set()
+
+
 async def _preload_from_supermemory(s) -> None:
     """Pull profile + recent context, push into the session Moss cache.
-    Fire-and-forget — first turn must not block on this."""
+    Background task — first turn must not block on this."""
     try:
         profile = await supermemory_client.get_profile(s.caller_phone)
         recent = await supermemory_client.search("recent topics", s.caller_phone, top_k=5)
@@ -68,6 +84,10 @@ async def _preload_from_supermemory(s) -> None:
                          "text": hit.text,
                          "metadata": {"source": hit.source or "supermemory.recent"}})
         if docs:
+            # Wait for the session index to exist before writing.
+            await s.index_ready.wait()
+            if s.call_ended:
+                return
             await moss_client.add_docs(f"session-{s.session_id}", docs)
             await bus.emit("memory_ingest", s.session_id, {
                 "tier": "session",
@@ -81,24 +101,35 @@ async def _preload_from_supermemory(s) -> None:
         log.warning("preload failed: %s", e)
 
 
-async def _start_call(caller_phone: str) -> dict:
-    """Begin a new call session."""
+async def _start_call(caller_phone: str, agentphone_call_id: str = "") -> dict:
+    """Begin a new call session. Returns immediately; Moss work happens
+    in the background so the FIRST Gemini turn isn't blocked by it."""
     s = call_session.new_session(caller_phone)
+    s.agentphone_call_id = agentphone_call_id
     with get_session() as db:
         cl = models.CallLog(session_id=s.session_id, caller_phone=caller_phone)
         db.add(cl)
         db.commit()
-    await moss_client.create_index(f"session-{s.session_id}", [{
-        "id": f"{s.session_id}-init",
-        "text": f"Call started with {caller_phone}",
-        "metadata": {"source": "system"},
-    }])
-    asyncio.create_task(_preload_from_supermemory(s))
+    # Emit call_start FIRST so the frontend can reset before any other event.
     await bus.emit("call_start", s.session_id, {
         "caller_phone": caller_phone,
         "session_id": s.session_id,
     })
+    # Fire-and-forget Moss work. index_ready gates anything that needs the index.
+    asyncio.create_task(_init_moss_session(s))
+    asyncio.create_task(_preload_from_supermemory(s))
     return {"session_id": s.session_id}
+
+
+def _similar_enough(a: str, b: str) -> bool:
+    """True if two short utterances are likely the same speech (ASR rewrites
+    like contraction changes, light punctuation drift). Uses stdlib difflib."""
+    if not a or not b:
+        return False
+    # Cheap pre-filter: very different lengths can't be the same speech.
+    if max(len(a), len(b)) > 0 and min(len(a), len(b)) / max(len(a), len(b)) < 0.7:
+        return False
+    return SequenceMatcher(None, a, b).ratio() >= 0.85
 
 
 # ---------- AgentPhone webhook ----------
@@ -123,18 +154,25 @@ async def _handle_agentphone_webhook(request: Request) -> dict:
         return {"text": ""}
 
     caller = (data.get("from") or "").strip()
+    incoming_call_id = (data.get("callId") or "").strip()
 
     # Call ended → wrap up if we still have an active session.
-    # On call_ended, `transcript` is a LIST of {role, content} turns containing
-    # the full conversation. We extract a session_id BEFORE tearing down so the
-    # post-call work-order extractor (which runs as a background task) can
-    # write to the right session row.
+    # IMPORTANT: only honor this event if its callId matches the session's
+    # callId. AgentPhone sometimes re-delivers stale call_ended events from
+    # PREVIOUS calls with the same phone number; without this check we'd end
+    # the active call by mistake.
     if event in ("agent.call_ended", "call.ended", "call_ended"):
         transcript_turns = data.get("transcript") if isinstance(data.get("transcript"), list) else []
         session_id_for_postcall = ""
         if caller:
             s = call_session.by_caller(caller)
             if s:
+                if s.agentphone_call_id and incoming_call_id and s.agentphone_call_id != incoming_call_id:
+                    log.warning(
+                        "ignoring stale call_ended: event callId=%s but active session callId=%s",
+                        incoming_call_id, s.agentphone_call_id,
+                    )
+                    return {"text": ""}
                 session_id_for_postcall = s.session_id
                 try:
                     await end_call_tool(s)
@@ -160,7 +198,7 @@ async def _handle_agentphone_webhook(request: Request) -> dict:
 
     # First contact for this caller → start a session and play a greeting
     if s is None:
-        await _start_call(caller)
+        await _start_call(caller, agentphone_call_id=incoming_call_id)
         s = call_session.by_caller(caller)
         greeting = "Hi, thanks for calling ChargeForward — this is Volt. How can I help?"
         if s is not None:
@@ -177,6 +215,11 @@ async def _handle_agentphone_webhook(request: Request) -> dict:
             reply = await run_turn(s, transcript)
         return {"text": f"{greeting} {reply}".strip()}
 
+    # If we don't yet have a callId stored (e.g. session created before
+    # AgentPhone sent one), pick it up from this event.
+    if not s.agentphone_call_id and incoming_call_id:
+        s.agentphone_call_id = incoming_call_id
+
     # Ongoing call — run the turn loop on the caller's transcript.
     # Serialize via per-session lock; AgentPhone occasionally delivers
     # overlapping webhooks for the same call which used to race the agent.
@@ -186,11 +229,11 @@ async def _handle_agentphone_webhook(request: Request) -> dict:
         if s.call_ended:
             return {"text": ""}
         # AgentPhone sends INCREMENTAL ASR updates: the same utterance grows
-        # word-by-word across multiple webhooks. We only want to process the
-        # FINAL transcription. Treat any new utterance that starts with the
-        # previous one (or is fully contained in it) as a growing update and
-        # skip — the model is still receiving the longer version on the next
-        # webhook anyway. Also catches exact-duplicate re-deliveries.
+        # word-by-word across multiple webhooks, sometimes with the ASR
+        # rewriting words (e.g. "charger's" -> "charger is"). Drop any
+        # webhook whose transcript is (a) identical to the previous, (b) a
+        # prefix-extension of the previous, OR (c) similar enough (>=85%)
+        # that it's almost certainly the same speech re-edited.
         prev = s.last_caller_utterance
         if prev:
             if transcript == prev:
@@ -201,10 +244,17 @@ async def _handle_agentphone_webhook(request: Request) -> dict:
                     "dedup: interim ASR update (prev=%d ch, now=%d ch), skipping",
                     len(prev), len(transcript),
                 )
-                # Update so the LONGEST version is what we eventually process
                 s.last_caller_utterance = (
                     transcript if len(transcript) > len(prev) else prev
                 )
+                return {"text": ""}
+            if _similar_enough(transcript, prev):
+                log.info(
+                    "dedup: fuzzy match (sim>=0.85) — ASR rewrite of same speech, skipping",
+                )
+                # Keep whichever version is longer as the canonical
+                if len(transcript) > len(prev):
+                    s.last_caller_utterance = transcript
                 return {"text": ""}
         s.last_caller_utterance = transcript
         reply = await run_turn(s, transcript)
