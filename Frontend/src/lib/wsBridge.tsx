@@ -252,6 +252,24 @@ function handle(evt: AnyVoltEvent): void {
       return;
     }
 
+    case "dispatch_update": {
+      const p = evt.payload;
+      useWorkOrderStore.getState().setDispatchStatus(String(p.wo_id), p.status);
+      return;
+    }
+
+    case "technician_email": {
+      const p = evt.payload;
+      useWorkOrderStore.getState().appendEmailToThread(String(p.wo_id), {
+        direction: p.direction,
+        from: p.from,
+        subject: p.subject,
+        body: p.body_preview,
+        timestamp: evt.timestamp,
+      });
+      return;
+    }
+
     case "admin_update":
     default:
       return;

@@ -25,6 +25,7 @@ export type ToolName =
   | "get_charger_telemetry"
   | "send_remote_command"
   | "create_work_order"
+  | "dispatch_technician"
   | "generate_report"
   | "advance_to_scoping"
   | "advance_to_triage"
@@ -88,7 +89,7 @@ export const STATE_SUFFIX: Record<Exclude<StateName, "ended">, string> = {
 
 export const ALL_TOOLS: ToolName[] = [
   "recall_session", "recall_knowledge", "get_charger_telemetry",
-  "send_remote_command", "create_work_order", "generate_report",
+  "send_remote_command", "create_work_order", "dispatch_technician", "generate_report",
   "advance_to_scoping", "advance_to_triage",
   "route_to_user_issue", "route_to_software_issue", "route_to_hardware_issue",
   "advance_to_wrap_up", "end_call",
@@ -100,7 +101,7 @@ export const STATE_TOOLS: Record<Exclude<StateName, "ended">, ToolName[]> = {
   triage: ["recall_session", "route_to_user_issue", "route_to_software_issue", "route_to_hardware_issue"],
   resolve_user: ["recall_session", "recall_knowledge", "advance_to_wrap_up"],
   resolve_software: ["recall_session", "recall_knowledge", "get_charger_telemetry", "send_remote_command", "advance_to_wrap_up"],
-  resolve_hardware: ["recall_session", "recall_knowledge", "get_charger_telemetry", "create_work_order", "advance_to_wrap_up"],
+  resolve_hardware: ["recall_session", "recall_knowledge", "get_charger_telemetry", "create_work_order", "dispatch_technician", "advance_to_wrap_up"],
   wrap_up: ["generate_report", "end_call"],
 };
 
@@ -110,6 +111,7 @@ export const TOOL_CATEGORY: Record<ToolName, "memory" | "telemetry" | "action" |
   get_charger_telemetry: "telemetry",
   send_remote_command: "action",
   create_work_order: "action",
+  dispatch_technician: "action",
   generate_report: "action",
   advance_to_scoping: "transition",
   advance_to_triage: "transition",
@@ -136,4 +138,6 @@ export type AnyVoltEvent =
   | { type: "tool_artifact"; session_id: string; timestamp: string; payload: Record<string, unknown> & { kind: string } }
   | { type: "work_order_created"; session_id: string; timestamp: string; payload: Record<string, unknown> }
   | { type: "gemini_analysis"; session_id: string; timestamp: string; payload: import("./types").GeminiResult }
+  | { type: "dispatch_update"; session_id: string | null; timestamp: string; payload: { wo_id: number; status: string; technician_email: string; inbox_id: string; thread_count: number } }
+  | { type: "technician_email"; session_id: string | null; timestamp: string; payload: { wo_id: number; direction: "inbound" | "outbound"; from: string; subject: string; body_preview: string } }
   | { type: "reset"; session_id: null; timestamp: string; payload: Record<string, never> };

@@ -25,6 +25,10 @@ DATA_RAG_DIR = ROOT / "Data_RAG"
 
 VOLT_KB_INDEX = "volt-kb"
 
+AGENTMAIL_API_KEY        = os.getenv("AGENTMAIL_API_KEY", "")
+AGENTMAIL_WEBHOOK_SECRET = os.getenv("AGENTMAIL_WEBHOOK_SECRET", "")
+TECHNICIAN_EMAIL         = os.getenv("TECHNICIAN_EMAIL", "technician@example.com")
+
 
 def using_supermemory_stub() -> bool:
     return not SUPERMEMORY_API_KEY
@@ -32,3 +36,7 @@ def using_supermemory_stub() -> bool:
 
 def using_moss_stub() -> bool:
     return not (MOSS_PROJECT_ID and MOSS_PROJECT_KEY)
+
+
+def using_agentmail_stub() -> bool:
+    return not AGENTMAIL_API_KEY

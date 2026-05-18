@@ -1,7 +1,7 @@
 export type CallStatus = 'idle' | 'active' | 'ended'
 export type FaultSeverity = 'critical' | 'warning' | 'info'
 export type Urgency = 'P1' | 'P2' | 'P3' | 'P4'
-export type WOStatus = 'open' | 'dispatched' | 'resolved' | 'on_hold'
+export type WOStatus = 'open' | 'dispatched' | 'in_progress' | 'complete' | 'resolved' | 'on_hold' | 'cancelled'
 export type StockStatus = 'in_stock' | 'low_stock' | 'order_required'
 export type ChargerStatus = 'online' | 'offline' | 'degraded'
 
@@ -60,6 +60,25 @@ export interface WorkOrder {
   parts: WorkOrderPart[]
   timeline: WorkOrderTimelineEvent[]
   resolutionSummary?: string
+}
+
+export interface EmailMessage {
+  direction: 'outbound' | 'inbound'
+  from: string
+  subject: string
+  body: string
+  timestamp: string
+}
+
+export interface TechnicianDispatch {
+  id: number
+  workOrderId: number
+  technicianEmail: string
+  inboxId: string
+  status: 'pending' | 'dispatched' | 'in_progress' | 'complete' | 'cancelled'
+  emailThread: EmailMessage[]
+  dispatchedAt: string
+  completedAt?: string
 }
 
 export interface ChargerData {

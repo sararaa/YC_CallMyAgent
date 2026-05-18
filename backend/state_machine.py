@@ -33,8 +33,8 @@ STATES = {
         "tools": ["recall_session", "recall_knowledge", "get_charger_telemetry", "send_remote_command", "advance_to_wrap_up"],
     },
     "resolve_hardware": {
-        "suffix": "STAGE: Hardware issue resolution. Get the charger ID and visible symptoms. Call get_charger_telemetry to confirm the fault. Then call create_work_order with severity, symptoms, and telemetry snapshot. Then call advance_to_wrap_up.",
-        "tools": ["recall_session", "recall_knowledge", "get_charger_telemetry", "create_work_order", "advance_to_wrap_up"],
+        "suffix": "STAGE: Hardware issue resolution. Get the charger ID and visible symptoms. Call get_charger_telemetry to confirm the fault. Then call create_work_order with severity, symptoms, and telemetry snapshot. Then call dispatch_technician with the work_order_id returned by create_work_order. Then call advance_to_wrap_up.",
+        "tools": ["recall_session", "recall_knowledge", "get_charger_telemetry", "create_work_order", "dispatch_technician", "advance_to_wrap_up"],
     },
     "wrap_up": {
         "suffix": "STAGE: Wrap up. Summarize what happened and what was done in one or two sentences. Then call generate_report. Then thank the caller and call end_call.",
@@ -64,7 +64,7 @@ LAYOUT = {
 
 ALL_TOOLS = [
     "recall_session", "recall_knowledge", "get_charger_telemetry",
-    "send_remote_command", "create_work_order", "generate_report",
+    "send_remote_command", "create_work_order", "dispatch_technician", "generate_report",
     "advance_to_scoping", "advance_to_triage",
     "route_to_user_issue", "route_to_software_issue", "route_to_hardware_issue",
     "advance_to_wrap_up", "end_call",

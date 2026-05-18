@@ -42,8 +42,11 @@ export function statusBg(status: WOStatus): string {
   switch (status) {
     case 'open': return 'bg-blue-950/60 text-blue-400 border border-blue-500/30'
     case 'dispatched': return 'bg-violet-950/60 text-violet-400 border border-violet-500/30'
+    case 'in_progress': return 'bg-amber-950/60 text-amber-400 border border-amber-500/30'
+    case 'complete': return 'bg-green-950/60 text-green-400 border border-green-500/30'
     case 'resolved': return 'bg-green-950/60 text-green-400 border border-green-500/30'
     case 'on_hold': return 'bg-gray-800/60 text-gray-400 border border-gray-600/30'
+    case 'cancelled': return 'bg-red-950/60 text-red-400 border border-red-500/30'
   }
 }
 
@@ -51,8 +54,11 @@ export function statusLabel(status: WOStatus): string {
   switch (status) {
     case 'open': return 'Open'
     case 'dispatched': return 'Dispatched'
+    case 'in_progress': return 'In Progress'
+    case 'complete': return 'Complete'
     case 'resolved': return 'Resolved'
     case 'on_hold': return 'On Hold'
+    case 'cancelled': return 'Cancelled'
   }
 }
 
