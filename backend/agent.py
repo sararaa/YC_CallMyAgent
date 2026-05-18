@@ -60,16 +60,36 @@ def _record_turn(s: CallSession, role: str, parts: list[dict]) -> None:
     s.history.append({"role": role, "parts": parts})
 
 
-async def run_turn(s: CallSession, user_text: str) -> str:
+async def run_turn(s: CallSession, user_text: str, req_id: str = "") -> str:
     """Single webhook → reply turn. Drives Gemini with the current state's tools,
     executes any tool calls, loops until Gemini produces user-facing text.
-    Returns the final text to send back to AgentPhone."""
+    Returns the final text to send back to AgentPhone.
+
+    `req_id` is a best-effort correlation id propagated from the webhook
+    handler so logs across this turn (Gemini, tools, memory) can be grep'd
+    by a single id. Defaults to "" so direct callers (simulator etc.) still work.
+    """
+    # Best-effort propagation: stash on session so tool dispatch can grab it.
+    try:
+        if req_id:
+            s.current_req_id = req_id
+        elif s.current_req_id:
+            req_id = s.current_req_id
+    except Exception:  # noqa: BLE001
+        pass
+
+    t_turn_start = time.perf_counter()
+    log.info(
+        "TURN[%s] start state=%s history_turns=%d user_text_len=%d preview=%r",
+        req_id, s.current_state, len(s.history), len(user_text or ""), (user_text or "")[:80],
+    )
+
     await bus.emit("transcript", s.session_id, {"role": "caller", "text": user_text})
     # Index the user turn into the session Moss cache
     try:
         await memory_tool.append_turn(s, "caller", user_text)
     except Exception as e:  # noqa: BLE001
-        log.warning("append_turn caller failed: %s", e)
+        log.warning("[req_id=%s] append_turn caller failed: %s", req_id, e)
 
     _record_turn(s, "user", [{"text": user_text}])
 
@@ -93,11 +113,11 @@ async def run_turn(s: CallSession, user_text: str) -> str:
 
         tool_names = [d["name"] for t in tools for d in t.get("function_declarations", [])]
         log.info(
-            "GEMINI > state=%s hop=%d history_turns=%d tools=%s",
-            s.current_state, hop, len(history), tool_names,
+            "[req_id=%s] GEMINI > state=%s hop=%d history_turns=%d tools=%s",
+            req_id, s.current_state, hop, len(history), tool_names,
         )
-        log.debug("GEMINI > system_instruction=%r", sys)
-        log.debug("GEMINI > history=%s", json.dumps(s.history, default=str)[:2000])
+        log.debug("[req_id=%s] GEMINI > system_instruction=%r", req_id, sys)
+        log.debug("[req_id=%s] GEMINI > history=%s", req_id, json.dumps(s.history, default=str)[:2000])
 
         t0 = time.perf_counter()
         try:
@@ -117,7 +137,7 @@ async def run_turn(s: CallSession, user_text: str) -> str:
                 ),
             )
         except Exception as e:  # noqa: BLE001
-            log.exception("GEMINI ! call failed: %s", e)
+            log.exception("[req_id=%s] GEMINI ! call failed: %s", req_id, e)
             s.last_debug = {
                 "state": s.current_state,
                 "hop": hop,
@@ -128,6 +148,11 @@ async def run_turn(s: CallSession, user_text: str) -> str:
             }
             reply = "Sorry, I had a hiccup on my end. Could you repeat that?"
             await bus.emit("transcript", s.session_id, {"role": "agent", "text": reply, "error": str(e)})
+            total_ms = (time.perf_counter() - t_turn_start) * 1000
+            log.info(
+                "TURN[%s] done total_ms=%.0f hops=%d final_state=%s reply_len=%d outcome=gemini_error",
+                req_id, total_ms, hop + 1, s.current_state, len(reply),
+            )
             return reply
         gemini_ms = (time.perf_counter() - t0) * 1000
         await bus.emit("latency_sample", s.session_id, {"component": "gemini", "ms": gemini_ms})
@@ -135,8 +160,8 @@ async def run_turn(s: CallSession, user_text: str) -> str:
             usage = getattr(resp, "usage_metadata", None)
             finish = getattr((resp.candidates or [None])[0], "finish_reason", None)
             log.info(
-                "GEMINI < %.0fms finish=%s prompt_tokens=%s candidates_tokens=%s",
-                gemini_ms, finish,
+                "[req_id=%s] GEMINI < %.0fms finish=%s prompt_tokens=%s candidates_tokens=%s",
+                req_id, gemini_ms, finish,
                 getattr(usage, "prompt_token_count", None) if usage else None,
                 getattr(usage, "candidates_token_count", None) if usage else None,
             )
@@ -147,6 +172,11 @@ async def run_turn(s: CallSession, user_text: str) -> str:
         if not candidate or not candidate.content or not candidate.content.parts:
             reply = "Could you repeat that?"
             await bus.emit("transcript", s.session_id, {"role": "agent", "text": reply})
+            total_ms = (time.perf_counter() - t_turn_start) * 1000
+            log.info(
+                "TURN[%s] done total_ms=%.0f hops=%d final_state=%s reply_len=%d outcome=empty_candidate",
+                req_id, total_ms, hop + 1, s.current_state, len(reply),
+            )
             return reply
 
         # Split parts: function calls vs text
@@ -163,8 +193,8 @@ async def run_turn(s: CallSession, user_text: str) -> str:
                 text_chunks.append(part.text)
                 recorded_parts.append({"text": part.text})
         log.info(
-            "GEMINI < parts: %d function_calls=%s text=%r",
-            len(candidate.content.parts),
+            "[req_id=%s] GEMINI < parts: %d function_calls=%s text=%r",
+            req_id, len(candidate.content.parts),
             [(fc.name, dict(fc.args or {})) for fc in function_calls],
             (" ".join(text_chunks))[:200],
         )
@@ -188,16 +218,24 @@ async def run_turn(s: CallSession, user_text: str) -> str:
                 await bus.emit("tool_call_start", s.session_id, {
                     "request_id": request_id, "tool": fc.name, "args": args,
                 })
+                log.info(
+                    "TOOL[%s] start name=%s tool_req=%s args=%s",
+                    req_id, fc.name, request_id, json.dumps(args, default=str)[:200],
+                )
                 tstart = time.perf_counter()
                 try:
                     result = await dispatch(s, fc.name, args)
                     ok = "error" not in (result or {})
                 except Exception as e:  # noqa: BLE001
-                    log.exception("tool %s failed", fc.name)
+                    log.exception("[req_id=%s] tool %s failed", req_id, fc.name)
                     result = {"error": str(e)}
                     ok = False
                 duration_ms = (time.perf_counter() - tstart) * 1000
                 preview = _result_preview(result)
+                log.info(
+                    "TOOL[%s] end name=%s tool_req=%s duration_ms=%.0f ok=%s preview=%r",
+                    req_id, fc.name, request_id, duration_ms, ok, preview[:160],
+                )
                 await bus.emit("tool_call_end", s.session_id, {
                     "request_id": request_id,
                     "tool": fc.name,
@@ -214,7 +252,22 @@ async def run_turn(s: CallSession, user_text: str) -> str:
                     # Don't loop further; reply if model already produced text, else a polite goodbye.
                     reply = " ".join(text_chunks).strip() or "Thanks for calling. Have a great day."
                     _record_turn(s, "user", tool_response_parts)
+                    # Stash the goodbye on the session so the webhook handler
+                    # can include it in {"text": <goodbye>, "hangup": true}.
+                    # end_call tool already set hangup_after_reply=True and
+                    # cleared any stale pending_reply, so this is the new
+                    # canonical reply for the single remaining HTTP response.
+                    s.pending_reply = reply
                     await bus.emit("transcript", s.session_id, {"role": "agent", "text": reply})
+                    total_ms = (time.perf_counter() - t_turn_start) * 1000
+                    log.info(
+                        "END_CALL[%s] returning goodbye len=%d preview=%r hangup_via=response_flag",
+                        req_id, len(reply), reply[:120],
+                    )
+                    log.info(
+                        "TURN[%s] done total_ms=%.0f hops=%d final_state=%s reply_len=%d outcome=end_call",
+                        req_id, total_ms, hop + 1, s.current_state, len(reply),
+                    )
                     return reply
 
             _record_turn(s, "user", tool_response_parts)
@@ -233,8 +286,13 @@ async def run_turn(s: CallSession, user_text: str) -> str:
                 try:
                     await memory_tool.append_turn(s, "agent", reply)
                 except Exception as e:  # noqa: BLE001
-                    log.warning("append_turn agent (short-circuit) failed: %s", e)
+                    log.warning("[req_id=%s] append_turn agent (short-circuit) failed: %s", req_id, e)
                 await bus.emit("transcript", s.session_id, {"role": "agent", "text": reply})
+                total_ms = (time.perf_counter() - t_turn_start) * 1000
+                log.info(
+                    "TURN[%s] done total_ms=%.0f hops=%d final_state=%s reply_len=%d outcome=short_circuit_transition",
+                    req_id, total_ms, hop + 1, s.current_state, len(reply),
+                )
                 return reply
 
             # Otherwise loop: send tool responses back to Gemini for a follow-up
@@ -248,13 +306,23 @@ async def run_turn(s: CallSession, user_text: str) -> str:
         try:
             await memory_tool.append_turn(s, "agent", reply)
         except Exception as e:  # noqa: BLE001
-            log.warning("append_turn agent failed: %s", e)
+            log.warning("[req_id=%s] append_turn agent failed: %s", req_id, e)
         await bus.emit("transcript", s.session_id, {"role": "agent", "text": reply})
+        total_ms = (time.perf_counter() - t_turn_start) * 1000
+        log.info(
+            "TURN[%s] done total_ms=%.0f hops=%d final_state=%s reply_len=%d outcome=text_reply",
+            req_id, total_ms, hop + 1, s.current_state, len(reply),
+        )
         return reply
 
     # Hit safety cap
     fallback = "Let me make sure I understood — could you say that again?"
     await bus.emit("transcript", s.session_id, {"role": "agent", "text": fallback})
+    total_ms = (time.perf_counter() - t_turn_start) * 1000
+    log.warning(
+        "TURN[%s] done total_ms=%.0f hops=4 final_state=%s reply_len=%d outcome=safety_cap_fallback",
+        req_id, total_ms, s.current_state, len(fallback),
+    )
     return fallback
 
 

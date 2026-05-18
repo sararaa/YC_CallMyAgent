@@ -6,11 +6,15 @@ tool outside the current state's whitelist.
 """
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any, Awaitable, Callable
 
 from backend.session import CallSession
 from backend.state_machine import STATES
 from backend.tools import actions, memory, telemetry, transitions
+
+log = logging.getLogger("volt.tools")
 
 # --- Reusable fragments ---
 REASON = {
@@ -310,6 +314,22 @@ def tools_for_state(state: str) -> list[dict]:
 
 async def dispatch(s: CallSession, name: str, args: dict[str, Any]) -> dict:
     fn = DISPATCH.get(name)
+    req_id = getattr(s, "current_req_id", "") or ""
     if not fn:
+        log.warning("DISPATCH[%s] unknown_tool name=%s args_keys=%s",
+                    req_id, name, list((args or {}).keys()))
         return {"error": f"unknown tool {name}"}
-    return await fn(s, **(args or {}))
+    log.info("DISPATCH[%s] > name=%s args_keys=%s", req_id, name, list((args or {}).keys()))
+    t0 = time.perf_counter()
+    try:
+        result = await fn(s, **(args or {}))
+    except Exception:
+        duration_ms = (time.perf_counter() - t0) * 1000
+        log.info("DISPATCH[%s] < name=%s duration_ms=%.0f ok=False raised=True",
+                 req_id, name, duration_ms)
+        raise
+    duration_ms = (time.perf_counter() - t0) * 1000
+    ok = "error" not in (result or {})
+    log.info("DISPATCH[%s] < name=%s duration_ms=%.0f ok=%s",
+             req_id, name, duration_ms, ok)
+    return result

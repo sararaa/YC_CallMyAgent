@@ -158,19 +158,35 @@ def client() -> Any:
 
 
 async def create_index(name: str, docs: list[dict]) -> None:
+    t = time.perf_counter()
     await client().create_index(name, docs)
+    log.debug("MOSS create_index name=%s docs=%d latency_ms=%.1f",
+              name, len(docs or []), (time.perf_counter() - t) * 1000)
 
 
 async def add_docs(name: str, docs: list[dict]) -> None:
+    t = time.perf_counter()
     await client().add_docs(name, docs)
+    log.debug("MOSS add_docs name=%s docs=%d latency_ms=%.1f",
+              name, len(docs or []), (time.perf_counter() - t) * 1000)
 
 
 async def query(name: str, q: str, top_k: int = 5) -> QueryResult:
-    return await client().query(name, q, top_k=top_k)
+    t = time.perf_counter()
+    res = await client().query(name, q, top_k=top_k)
+    log.debug(
+        "MOSS query name=%s top_k=%d q_len=%d hits=%d hit=%s latency_ms=%.1f outer_ms=%.1f",
+        name, top_k, len(q or ""), len(res.hits), res.hit, res.latency_ms,
+        (time.perf_counter() - t) * 1000,
+    )
+    return res
 
 
 async def delete_index(name: str) -> None:
+    t = time.perf_counter()
     await client().delete_index(name)
+    log.debug("MOSS delete_index name=%s latency_ms=%.1f",
+              name, (time.perf_counter() - t) * 1000)
 
 
 async def list_indexes() -> list[str]:

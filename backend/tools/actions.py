@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import math
 from datetime import datetime, timezone
 
@@ -9,6 +11,16 @@ from backend.db.session import get_session
 from backend.memory import supermemory_client, moss_client
 from backend.observer import bus
 from backend.session import CallSession
+
+log = logging.getLogger("volt.actions")
+
+# Demo-time only: pretend a remote reboot takes a few seconds. Without this
+# the tool returns instantly with status="queued" and the agent races on to
+# the next reply, never giving the caller a moment to describe what's
+# happening on the charger screen. Sleeping here forces the model's tool
+# loop to wait inside the turn before it produces user-facing text. Easy
+# to disable by setting to 0.0.
+SIMULATED_REBOOT_S = 5.0
 
 
 def _clamp(c: float | None) -> float | None:
@@ -62,6 +74,52 @@ async def send_remote_command(
         "state": s.current_state,
         "text": f"Sending {command} → {charger_id}",
     })
+    # Demo theatre: pretend the reboot actually takes a few seconds so the
+    # agent (a) doesn't race on to its next reply, (b) gives the caller
+    # time to watch the charger screen, and (c) returns `status="completed"`
+    # rather than a permanently-queued command. Synchronously sleeping here
+    # blocks Gemini's turn loop until the tool resolves — which is exactly
+    # what we want for the demo.
+    req_id = getattr(s, "current_req_id", "") or ""
+    if SIMULATED_REBOOT_S > 0:
+        log.info(
+            "TOOL[%s] send_remote_command simulating reboot wait_s=%.1f charger_id=%s command=%s",
+            req_id, SIMULATED_REBOOT_S, charger_id, command,
+        )
+        await asyncio.sleep(SIMULATED_REBOOT_S)
+        with get_session() as db:
+            rc_row = db.get(models.RemoteCommand, cid)
+            if rc_row:
+                rc_row.status = "completed"
+                db.add(rc_row)
+                db.commit()
+        await bus.emit("admin_update", s.session_id, {
+            "kind": "remote_command",
+            "id": cid,
+            "fields": {
+                "charger_id": charger_id,
+                "command": command,
+                "status": "completed",
+                "reason": reason,
+                "confidence": confidence,
+            },
+        })
+        await bus.emit("tool_artifact", s.session_id, {
+            "kind": "remote_command",
+            "command_id": cid,
+            "charger_id": charger_id,
+            "command": command,
+            "status": "completed",
+        })
+        log.info(
+            "TOOL[%s] send_remote_command reboot completed charger_id=%s command=%s command_id=%d",
+            req_id, charger_id, command, cid,
+        )
+        return {
+            "command_id": cid,
+            "status": "completed",
+            "outcome": "reboot_completed",
+        }
     return {"command_id": cid, "status": "queued"}
 
 
@@ -307,57 +365,119 @@ async def generate_report(
 
 
 async def end_call(s: CallSession, **_kw) -> dict:
-    """Push transcript + summary to Supermemory, wipe Moss session index."""
+    """Mark the call as ended and schedule async teardown.
+
+    CRITICAL: this returns FAST. The actual teardown work (Supermemory
+    transcript+summary writes, Moss session-index delete, CallLog finalize,
+    `call_end` event) runs in a background task so the HTTP response back to
+    AgentPhone is not blocked by ~3s of Supermemory latency.
+
+    Hangup path: we set `s.hangup_after_reply = True` so the webhook handler
+    appends `{"hangup": true}` to its JSON response. AgentPhone's documented
+    behavior is to speak the response text in full before tearing the call
+    down — see https://docs.agentphone.ai/documentation/guides/webhooks
+    ("Voice webhook responses"). The previous defensive fallback (a delayed
+    POST to /v1/calls/{call_id}/end) was REMOVED in this round: it cut the
+    goodbye off mid-sentence at ~3.5s because TTS for a ~30-word goodbye
+    is closer to 9-10s. The body flag alone is the supported path.
+    """
     if s.call_ended:
+        log.info(
+            "END_CALL[%s] tool re-invoked (idempotent no-op) call_id=%s",
+            getattr(s, "current_req_id", "") or "", s.agentphone_call_id,
+        )
         return {"ok": True, "already_ended": True}
+
     s.call_ended = True
-    transcript_lines = []
-    for turn in s.history:
-        role = turn.get("role", "?")
-        for part in turn.get("parts", []):
-            if isinstance(part, dict) and part.get("text"):
-                transcript_lines.append(f"{role.upper()}: {part['text']}")
-    transcript = "\n".join(transcript_lines)
-
-    overall = _geo_mean(s.confidence_samples)
-    action_summary = (
-        f"Call with {s.caller_phone} ended in state {s.current_state}. "
-        f"Overall self-reported confidence: {overall:.2f}." if overall is not None
-        else f"Call with {s.caller_phone} ended in state {s.current_state}."
-    )
-
-    await supermemory_client.add(
-        content=transcript or "(empty transcript)",
-        container_tag=s.caller_phone,
-        metadata={"kind": "transcript", "session_id": s.session_id},
-    )
-    await supermemory_client.add(
-        content=action_summary,
-        container_tag=s.caller_phone,
-        metadata={"kind": "action_summary", "session_id": s.session_id},
-    )
-    await bus.emit("memory_ingest", s.session_id, {
-        "tier": "long_term",
-        "doc_id": f"{s.session_id}-transcript",
-        "text_preview": (transcript[:120] or "(empty)"),
-        "latency_ms": 0.0,
-    })
-
-    await moss_client.delete_index(f"session-{s.session_id}")
+    s.hangup_after_reply = True
+    # Defensive: any prior pending_reply is from an earlier turn and is no
+    # longer the canonical text — the agent.py end_call branch will set
+    # pending_reply to the goodbye after this tool returns. If a stray
+    # webhook arrives in between, we want the call_already_ended early
+    # return (empty text) to fire instead of echoing stale text.
+    s.pending_reply = ""
 
     duration_s = (datetime.now(timezone.utc) - s.started_at).total_seconds()
-    with get_session() as db:
-        existing = db.exec(select(models.CallLog).where(models.CallLog.session_id == s.session_id)).first()
-        if existing:
-            existing.ended_at = datetime.now(timezone.utc)
-            existing.final_state = s.current_state
-            existing.duration_s = duration_s
-            db.add(existing)
-            db.commit()
+    overall = _geo_mean(s.confidence_samples)
 
-    await bus.emit("call_end", s.session_id, {
-        "duration_s": duration_s,
-        "final_state": s.current_state,
-        "overall_confidence": overall,
-    })
-    return {"ok": True}
+    log.info(
+        "END_CALL[%s] marked call_ended=True hangup_after_reply=True call_id=%s state=%s "
+        "scheduling bg teardown (hangup_via=response_flag, api_fallback=disabled)",
+        getattr(s, "current_req_id", "") or "",
+        s.agentphone_call_id, s.current_state,
+    )
+
+    asyncio.create_task(_end_call_teardown(s, duration_s, overall))
+
+    return {"ok": True, "overall_confidence": overall}
+
+
+async def _end_call_teardown(s: CallSession, duration_s: float, overall: float | None) -> None:
+    """Background: push transcript + summary to Supermemory, wipe Moss session
+    index, finalize CallLog, emit `call_end`. Runs detached from the webhook
+    request so AgentPhone gets the goodbye text immediately.
+
+    Failures here are logged but do not affect the call lifecycle — the
+    caller has already heard the goodbye and AgentPhone has already hung
+    up by the time this either succeeds or fails.
+    """
+    req_id = getattr(s, "current_req_id", "") or ""
+    try:
+        transcript_lines = []
+        for turn in s.history:
+            role = turn.get("role", "?")
+            for part in turn.get("parts", []):
+                if isinstance(part, dict) and part.get("text"):
+                    transcript_lines.append(f"{role.upper()}: {part['text']}")
+        transcript = "\n".join(transcript_lines)
+
+        action_summary = (
+            f"Call with {s.caller_phone} ended in state {s.current_state}. "
+            f"Overall self-reported confidence: {overall:.2f}." if overall is not None
+            else f"Call with {s.caller_phone} ended in state {s.current_state}."
+        )
+
+        await supermemory_client.add(
+            content=transcript or "(empty transcript)",
+            container_tag=s.caller_phone,
+            metadata={"kind": "transcript", "session_id": s.session_id},
+        )
+        await supermemory_client.add(
+            content=action_summary,
+            container_tag=s.caller_phone,
+            metadata={"kind": "action_summary", "session_id": s.session_id},
+        )
+        await bus.emit("memory_ingest", s.session_id, {
+            "tier": "long_term",
+            "doc_id": f"{s.session_id}-transcript",
+            "text_preview": (transcript[:120] or "(empty)"),
+            "latency_ms": 0.0,
+        })
+
+        await moss_client.delete_index(f"session-{s.session_id}")
+
+        with get_session() as db:
+            existing = db.exec(
+                select(models.CallLog).where(models.CallLog.session_id == s.session_id)
+            ).first()
+            if existing:
+                existing.ended_at = datetime.now(timezone.utc)
+                existing.final_state = s.current_state
+                existing.duration_s = duration_s
+                db.add(existing)
+                db.commit()
+
+        await bus.emit("call_end", s.session_id, {
+            "duration_s": duration_s,
+            "final_state": s.current_state,
+            "overall_confidence": overall,
+        })
+        log.info(
+            "END_CALL[%s] bg teardown complete call_id=%s duration_s=%.1f",
+            req_id, s.agentphone_call_id, duration_s,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning(
+            "END_CALL[%s] bg teardown FAILED call_id=%s err=%s",
+            req_id, s.agentphone_call_id, e,
+        )

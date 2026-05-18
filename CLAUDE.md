@@ -1,4 +1,3 @@
-````markdown
 # Volt — Voice Support Agent for EV Charging (Hackathon Build)
 
 ## 0. Project brief
