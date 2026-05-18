@@ -44,10 +44,12 @@ class _MessagePayload(BaseModel):
 
 class WebhookPayload(BaseModel):
     type: str = ""
+    event_type: str = Field(alias="eventType", default="")
     event_id: str = ""
     message: _MessagePayload = Field(default_factory=_MessagePayload)
 
     class Config:
+        populate_by_name = True
         extra = "allow"
 
 
@@ -79,8 +81,13 @@ async def agentmail_webhook(request: Request) -> dict:
 
     payload = WebhookPayload.model_validate(json.loads(raw_body))
 
-    if payload.type != "message.received":
-        log.debug("Ignoring AgentMail event: %s", payload.type)
+    # AgentMail sends type="event", event_type="message.received"
+    is_message_received = (
+        payload.type == "message.received"
+        or payload.event_type == "message.received"
+    )
+    if not is_message_received:
+        log.debug("Ignoring AgentMail event type=%r event_type=%r", payload.type, payload.event_type)
         return {"ok": True, "skipped": True}
 
     msg = payload.message

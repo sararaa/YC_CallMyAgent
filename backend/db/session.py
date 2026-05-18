@@ -14,7 +14,7 @@ def init_db() -> None:
 
 
 def get_session() -> Session:
-    return Session(_engine)
+    return Session(_engine, expire_on_commit=False)
 
 
 def reset_db() -> None:
