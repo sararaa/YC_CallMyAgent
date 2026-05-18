@@ -4,19 +4,40 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { motion } from 'framer-motion'
 import { ArrowLeft, CheckCircle, ClipboardList, Loader2, Mail, RefreshCw, X, Zap } from 'lucide-react'
-import { EmailMessage, WorkOrder } from '@/lib/types'
+import { EmailMessage, WorkOrder, WorkOrderTimelineEvent } from '@/lib/types'
 import { WorkOrderTimeline } from '@/components/workorders/WorkOrderTimeline'
 import { urgencyBg, statusBg, statusLabel, formatDate } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/LoadingSkeleton'
 import { useWorkOrderStore } from '@/store/workOrderStore'
 
-// Map TECHNICIANS display names to emails for the demo
 const TECH_EMAILS: Record<string, string> = {
+  'Sina Vaghefi': 'sina@datapigeon.org',
   'Alex Rivera': 'sina@datapigeon.org',
   'Jordan Kim': 'sina@datapigeon.org',
   'Sam Patel': 'sina@datapigeon.org',
   'Taylor Wong': 'sina@datapigeon.org',
-  'Morgan Chen': 'sina@datapigeon.org',
+}
+
+/** Derive rich timeline events from the email thread instead of the sparse backend list. */
+function buildTimeline(base: WorkOrderTimelineEvent[], thread: EmailMessage[]): WorkOrderTimelineEvent[] {
+  const events: WorkOrderTimelineEvent[] = [...base]
+  for (const msg of thread) {
+    if (msg.direction !== 'outbound') continue
+    const sub = msg.subject ?? ''
+    if (!sub.includes('Re:')) {
+      events.push({ event: 'Dispatched to technician', timestamp: msg.timestamp })
+    } else if (sub.includes('Confirmed')) {
+      events.push({ event: 'Technician accepted — en route', timestamp: msg.timestamp })
+    } else if (sub.includes('Answer')) {
+      events.push({ event: 'Question answered by AI', timestamp: msg.timestamp })
+    } else if (sub.includes('Closed')) {
+      events.push({ event: 'Work order completed', timestamp: msg.timestamp })
+    } else if (sub.includes('Cancelled')) {
+      events.push({ event: 'Work order cancelled', timestamp: msg.timestamp })
+    }
+    // "Clarification Needed" intentionally omitted — noise
+  }
+  return events
 }
 
 function EmailBubble({ msg }: { msg: EmailMessage }) {
@@ -24,7 +45,7 @@ function EmailBubble({ msg }: { msg: EmailMessage }) {
   return (
     <div className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`max-w-[85%] rounded-xl px-4 py-3 text-sm ${
+        className={`max-w-[80%] rounded-xl px-4 py-3 text-sm ${
           isOutbound
             ? 'bg-slate-800 border-l-2 border-cyan-500'
             : 'bg-slate-900/60 border-l-2 border-violet-500'
@@ -46,7 +67,7 @@ function EmailBubble({ msg }: { msg: EmailMessage }) {
   )
 }
 
-const TECHNICIANS = ['Alex Rivera', 'Jordan Kim', 'Sam Patel', 'Taylor Wong', 'Morgan Chen']
+const TECHNICIANS = ['Sina Vaghefi', 'Alex Rivera', 'Jordan Kim', 'Sam Patel', 'Taylor Wong']
 
 export default function WorkOrderDetail() {
   const { id } = useParams<{ id: string }>()
@@ -59,11 +80,9 @@ export default function WorkOrderDetail() {
   const [confirming, setConfirming] = useState(false)
   const [localThread, setLocalThread] = useState<EmailMessage[]>([])
 
-  // Live thread from WS
   const wsThread = useWorkOrderStore((s) => s.dispatchThreads[id.replace(/^wo-/, '')]) ?? []
   const wsStatus = useWorkOrderStore((s) => s.dispatchStatuses[id.replace(/^wo-/, '')])
 
-  // Merge: local (from REST on load) + WS (live updates), deduplicated by timestamp+from
   const thread: EmailMessage[] = (() => {
     const seen = new Set(localThread.map((m) => `${m.timestamp}|${m.from}`))
     const extras = wsThread.filter((m) => !seen.has(`${m.timestamp}|${m.from}`))
@@ -78,7 +97,6 @@ export default function WorkOrderDetail() {
       .then((data) => { setWo(data); setLoading(false) })
   }, [id])
 
-  // Hydrate thread if WO is already dispatched
   useEffect(() => {
     if (!wo) return
     const alreadyDispatched = ['dispatched', 'in_progress', 'complete', 'resolved'].includes(wo.status)
@@ -96,12 +114,8 @@ export default function WorkOrderDetail() {
     setConfirming(true)
     try {
       const res = await fetch(`/api/workorders/${id}/confirm`, { method: 'POST' })
-      if (res.ok) {
-        setWo((prev) => prev ? { ...prev, status: 'in_progress' } : null)
-      }
-    } finally {
-      setConfirming(false)
-    }
+      if (res.ok) setWo((prev) => prev ? { ...prev, status: 'in_progress' } : null)
+    } finally { setConfirming(false) }
   }
 
   async function handleReopen() {
@@ -109,12 +123,8 @@ export default function WorkOrderDetail() {
     setReopening(true)
     try {
       const res = await fetch(`/api/workorders/${id}/reopen`, { method: 'POST' })
-      if (res.ok) {
-        setWo((prev) => prev ? { ...prev, status: 'open' } : null)
-      }
-    } finally {
-      setReopening(false)
-    }
+      if (res.ok) setWo((prev) => prev ? { ...prev, status: 'open' } : null)
+    } finally { setReopening(false) }
   }
 
   async function handleCancel() {
@@ -122,12 +132,8 @@ export default function WorkOrderDetail() {
     setCancelling(true)
     try {
       const res = await fetch(`/api/workorders/${id}/cancel`, { method: 'POST' })
-      if (res.ok) {
-        setWo((prev) => prev ? { ...prev, status: 'cancelled' } : null)
-      }
-    } finally {
-      setCancelling(false)
-    }
+      if (res.ok) setWo((prev) => prev ? { ...prev, status: 'cancelled' } : null)
+    } finally { setCancelling(false) }
   }
 
   async function handleDispatch() {
@@ -144,14 +150,12 @@ export default function WorkOrderDetail() {
         setWo((prev) => prev ? { ...prev, status: 'dispatched', assignedTech: tech } : null)
         if (data.email_thread) setLocalThread(data.email_thread)
       }
-    } finally {
-      setDispatching(false)
-    }
+    } finally { setDispatching(false) }
   }
 
   if (loading) {
     return (
-      <div className="p-5 max-w-4xl mx-auto space-y-3">
+      <div className="p-6 max-w-6xl mx-auto space-y-3">
         <Skeleton className="h-7 w-48" />
         <Skeleton className="h-5 w-64" />
         <Skeleton className="h-40 w-full" />
@@ -168,9 +172,10 @@ export default function WorkOrderDetail() {
   }
 
   const displayStatus = effectiveStatus ?? wo.status
+  const timeline = buildTimeline(wo.timeline, thread)
 
   return (
-    <div className="p-5 max-w-4xl mx-auto">
+    <div className="p-6 max-w-6xl mx-auto">
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
         <Link href="/work-orders" className="inline-flex items-center gap-1.5 text-[15px] text-text-muted hover:text-text-secondary mb-5 transition-colors">
           <ArrowLeft className="w-3.5 h-3.5" />
@@ -195,48 +200,37 @@ export default function WorkOrderDetail() {
 
           <div className="flex items-center gap-2">
             {displayStatus === 'dispatched' && (
-              <button
-                onClick={handleConfirm}
-                disabled={confirming}
-                className="flex items-center gap-1.5 bg-emerald-950/60 border border-emerald-500/30 text-emerald-400 font-medium px-3 py-1.5 rounded-md text-[15px] hover:bg-emerald-900/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
+              <button onClick={handleConfirm} disabled={confirming}
+                className="flex items-center gap-1.5 bg-emerald-950/60 border border-emerald-500/30 text-emerald-400 font-medium px-3 py-1.5 rounded-md text-[15px] hover:bg-emerald-900/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                 {confirming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
                 {confirming ? 'Confirming…' : 'Confirm Accepted'}
               </button>
             )}
             {displayStatus === 'cancelled' && (
-              <button
-                onClick={handleReopen}
-                disabled={reopening}
-                className="flex items-center gap-1.5 bg-amber-950/60 border border-amber-500/30 text-amber-400 font-medium px-3 py-1.5 rounded-md text-[15px] hover:bg-amber-900/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
+              <button onClick={handleReopen} disabled={reopening}
+                className="flex items-center gap-1.5 bg-amber-950/60 border border-amber-500/30 text-amber-400 font-medium px-3 py-1.5 rounded-md text-[15px] hover:bg-amber-900/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                 {reopening ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                 {reopening ? 'Reopening…' : 'Reopen WO'}
               </button>
             )}
             {canCancel && (
-              <button
-                onClick={handleCancel}
-                disabled={cancelling}
-                className="flex items-center gap-1.5 bg-red-950/60 border border-red-500/30 text-red-400 font-medium px-3 py-1.5 rounded-md text-[15px] hover:bg-red-900/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
+              <button onClick={handleCancel} disabled={cancelling}
+                className="flex items-center gap-1.5 bg-red-950/60 border border-red-500/30 text-red-400 font-medium px-3 py-1.5 rounded-md text-[15px] hover:bg-red-900/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                 {cancelling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
                 {cancelling ? 'Cancelling…' : 'Cancel WO'}
               </button>
             )}
-            <button
-              onClick={handleDispatch}
-              disabled={!canDispatch || dispatching}
-              className="flex items-center gap-1.5 bg-cyan-electric/15 text-cyan-electric border border-cyan-electric/30 font-medium px-3 py-1.5 rounded-md text-[15px] hover:bg-cyan-electric/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
+            <button onClick={handleDispatch} disabled={!canDispatch || dispatching}
+              className="flex items-center gap-1.5 bg-cyan-electric/15 text-cyan-electric border border-cyan-electric/30 font-medium px-3 py-1.5 rounded-md text-[15px] hover:bg-cyan-electric/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
               {dispatching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
               {dispatching ? 'Dispatching…' : 'Dispatch'}
             </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-3">
-          {/* Left */}
+        {/* Two-column content */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-3 mb-3">
+          {/* Left column */}
           <div className="space-y-3">
             <Section title="Summary">
               <p className="text-[15px] text-text-secondary leading-relaxed">{wo.summary}</p>
@@ -245,8 +239,7 @@ export default function WorkOrderDetail() {
             <Section title="Details">
               <div className="grid grid-cols-2 gap-2">
                 {[
-                  { label: 'Customer',      value: wo.customerName },
-                  { label: 'Charger ID',    value: wo.chargerId },
+                  { label: 'Charger ID',    value: wo.chargerId?.toUpperCase() || '—' },
                   { label: 'Fault Code',    value: wo.faultCode },
                   { label: 'Location',      value: wo.location },
                   { label: 'Assigned Tech', value: wo.assignedTech || 'Unassigned' },
@@ -278,9 +271,7 @@ export default function WorkOrderDetail() {
                       </div>
                       <div className="flex items-center gap-2">
                         {p.recommended && (
-                          <span className="text-[15px] text-cyan-electric bg-cyan-electric/10 border border-cyan-electric/20 px-1.5 py-0.5 rounded">
-                            Recommended
-                          </span>
+                          <span className="text-[15px] text-cyan-electric bg-cyan-electric/10 border border-cyan-electric/20 px-1.5 py-0.5 rounded">Recommended</span>
                         )}
                         <span className="text-[15px] text-text-muted font-mono">×{p.qty}</span>
                       </div>
@@ -315,36 +306,36 @@ export default function WorkOrderDetail() {
             )}
           </div>
 
-          {/* Right */}
-          <div className="space-y-3">
+          {/* Right column — timeline */}
+          <div>
             <Section title="Timeline">
-              <WorkOrderTimeline events={wo.timeline} />
+              <WorkOrderTimeline events={timeline} />
             </Section>
-
-            {/* Email thread */}
-            <div className="panel p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <Mail className="w-3.5 h-3.5 text-text-muted" />
-                <p className="text-[15px] font-medium text-text-muted">Technician Email Thread</p>
-                {thread.length > 0 && (
-                  <span className="ml-auto text-[13px] text-text-muted font-mono">
-                    {thread.length} msg{thread.length !== 1 ? 's' : ''}
-                  </span>
-                )}
-              </div>
-              {thread.length === 0 ? (
-                <p className="text-[15px] text-text-muted text-center py-4">
-                  No emails yet — select a technician and click Dispatch.
-                </p>
-              ) : (
-                <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1">
-                  {thread.map((msg, i) => (
-                    <EmailBubble key={i} msg={msg} />
-                  ))}
-                </div>
-              )}
-            </div>
           </div>
+        </div>
+
+        {/* Email thread — full width below */}
+        <div className="panel p-5 border border-slate-700/60">
+          <div className="flex items-center gap-2 mb-4">
+            <Mail className="w-4 h-4 text-cyan-400" />
+            <p className="text-[15px] font-semibold text-text-primary">Technician Email Thread</p>
+            {thread.length > 0 && (
+              <span className="ml-auto text-[13px] text-text-muted font-mono bg-slate-800 px-2 py-0.5 rounded-full border border-slate-700">
+                {thread.length} msg{thread.length !== 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
+          {thread.length === 0 ? (
+            <div className="rounded-xl bg-slate-900/60 border border-slate-700/50 text-center py-8">
+              <p className="text-[15px] text-text-muted">No emails yet — select a technician and click Dispatch.</p>
+            </div>
+          ) : (
+            <div className="rounded-xl bg-gradient-to-b from-slate-900/80 to-slate-950/60 border border-slate-700/50 p-4 space-y-3 max-h-[70vh] overflow-y-auto">
+              {thread.map((msg, i) => (
+                <EmailBubble key={i} msg={msg} />
+              ))}
+            </div>
+          )}
         </div>
       </motion.div>
     </div>

@@ -124,6 +124,13 @@ def synth_charger(charger_id: str) -> Optional[dict]:
     }
 
 
+def _extract_fault_code(telemetry: str) -> str:
+    if not telemetry:
+        return "—"
+    m = re.search(r'(?:fault|error|code)\s*[:#]?\s*([\w-]+)', telemetry, re.IGNORECASE)
+    return m.group(1) if m else "—"
+
+
 def _wo_to_frontend(wo: models.WorkOrder) -> dict:
     """Adapt our WorkOrder row to their frontend WorkOrder shape."""
     return {
@@ -133,7 +140,7 @@ def _wo_to_frontend(wo: models.WorkOrder) -> dict:
         "chargerId": wo.charger_id,
         "location": f"Volt Network · {wo.charger_id.upper()} pad",
         "customerName": "—",
-        "faultCode": "—",
+        "faultCode": _extract_fault_code(wo.telemetry_snippet or ""),
         "urgency": _severity_to_urgency(wo.severity),
         "status": _wo_status_to_frontend(wo.status),
         "assignedTech": None,

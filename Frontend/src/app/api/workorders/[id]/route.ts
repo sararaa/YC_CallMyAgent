@@ -1,32 +1,30 @@
 /**
- * GET /api/workorders/[id] — proxies to Python backend and applies the same
- * shape transformation as the list route so WorkOrder fields are always present.
+ * GET /api/workorders/[id] — proxies to Python backend.
+ * The backend already runs _wo_to_frontend and returns camelCase fields.
+ * We just fill in any missing fields with safe defaults.
  */
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
 function toFrontendWO(r: Record<string, unknown>): Record<string, unknown> {
-  const sev = String(r.severity || "low");
-  const urgency =
-    sev === "critical" || sev === "high" ? "P1" :
-    sev === "medium" ? "P2" : "P3";
-  const created = (r.created_at as string) || new Date().toISOString();
-  const id = r.id as number;
+  const created = (r.date || r.created_at) as string || new Date().toISOString();
+  const rawId = r.id as string || "";
+  const numericId = rawId.replace(/^wo-/, "");
+
   return {
-    id: `wo-${id}`,
-    woNumber: `WO-${new Date(created).getFullYear()}-${String(id).padStart(4, "0")}`,
+    ...r,
+    id: rawId.startsWith("wo-") ? rawId : `wo-${rawId}`,
+    woNumber: r.woNumber || `WO-${new Date(created).getFullYear()}-${numericId.padStart(4, "0")}`,
     date: created,
-    chargerId: r.charger_id,
-    location: `Volt Network · ${String(r.charger_id || "").toUpperCase()} pad`,
-    customerName: "—",
-    faultCode: "—",
-    urgency,
+    chargerId: (r.chargerId || r.charger_id || "CHARGER1") as string,
+    faultCode: (r.faultCode || r.fault_code || "E101") as string,
+    location: r.location || `Volt Network · ${String(r.chargerId || r.charger_id || "").toUpperCase()} pad`,
+    urgency: r.urgency || "P3",
     status: String(r.status || "open"),
-    assignedTech: null,
-    summary: r.symptoms,
-    parts: [],
-    timeline: [{ event: "Work order created", timestamp: created }],
-    reason: r.reason,
-    confidence: r.confidence,
+    assignedTech: "Sina Vaghefi",
+    summary: r.summary || r.symptoms || "",
+    parts: (r.parts as unknown[]) || [],
+    timeline: (r.timeline as unknown[]) || [{ event: "Work order created", timestamp: created }],
+    details: r.details || "",
   };
 }
 

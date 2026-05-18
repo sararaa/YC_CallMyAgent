@@ -30,7 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-full flex flex-col bg-bg-base text-text-primary antialiased">
         <WsBridge />
         <Navbar />
-        <main className="flex-1 overflow-hidden">{children}</main>
+        <main className="flex-1 overflow-y-auto">{children}</main>
         <ToastNotification />
         <WorkOrderModal />
       </body>
