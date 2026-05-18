@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend import config
 from backend.db.session import init_db
-from backend.routes import admin_api, agentphone, dashboard_ws
+from backend.routes import admin_api, agentmail_webhook, agentphone, dashboard_ws
 from backend.scripts.upload import build_volt_kb
 
 logging.basicConfig(
@@ -38,6 +38,8 @@ async def lifespan(_: FastAPI):
         log.info("volt-kb rebuilt with %d chunks", n)
     except Exception as e:  # noqa: BLE001
         log.warning("startup moss bootstrap failed: %s", e)
+    if config.using_agentmail_stub():
+        log.warning("AGENTMAIL_API_KEY not set — using dispatch stub (logs only).")
     yield
 
 
@@ -54,6 +56,7 @@ app.add_middleware(
 app.include_router(dashboard_ws.router)
 app.include_router(admin_api.router)
 app.include_router(agentphone.router)
+app.include_router(agentmail_webhook.router)
 
 
 @app.get("/health")

@@ -155,4 +155,11 @@ def _severity_to_urgency(sev: str) -> str:
 
 
 def _wo_status_to_frontend(s: str) -> str:
-    return {"open": "open", "in_progress": "dispatched", "resolved": "resolved"}.get(s, "open")
+    return {
+        "open": "open",
+        "dispatched": "dispatched",
+        "in_progress": "in_progress",
+        "complete": "complete",
+        "resolved": "resolved",
+        "cancelled": "cancelled",
+    }.get(s, "open")

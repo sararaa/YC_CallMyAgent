@@ -137,6 +137,20 @@ DECLARATIONS: dict[str, dict] = {
             "required": ["resolution_type", "summary", "actions_taken"],
         },
     },
+    "dispatch_technician": {
+        "name": "dispatch_technician",
+        "description": "Email a field technician to dispatch them for a hardware work order. Call only after create_work_order has returned a work_order_id.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "work_order_id": {"type": "integer", "description": "The work_order_id returned by create_work_order."},
+                "technician_email": {"type": "string", "description": "Optional override email; defaults to the on-call technician from config."},
+                "reason": REASON,
+                "confidence": CONFIDENCE,
+            },
+            "required": ["work_order_id"],
+        },
+    },
     "advance_to_scoping": {
         "name": "advance_to_scoping",
         "description": "Transition to the scoping stage. The `reason` should name the SURFACE-LEVEL PROBLEM the caller just reported, in their own framing.",
@@ -273,6 +287,7 @@ DISPATCH: dict[str, Dispatcher] = {
     "get_charger_telemetry": telemetry.get_charger_telemetry,
     "send_remote_command": actions.send_remote_command,
     "create_work_order": actions.create_work_order,
+    "dispatch_technician": actions.dispatch_technician,
     "generate_report": actions.generate_report,
     "advance_to_scoping": transitions.advance_to_scoping,
     "advance_to_triage": transitions.advance_to_triage,

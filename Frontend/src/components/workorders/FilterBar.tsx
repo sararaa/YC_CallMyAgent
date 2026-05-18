@@ -4,11 +4,13 @@ import { cn } from '@/lib/utils'
 import { WOStatus } from '@/lib/types'
 
 const STATUSES: { label: string; value: 'all' | WOStatus }[] = [
-  { label: 'All',        value: 'all' },
-  { label: 'Open',       value: 'open' },
-  { label: 'Dispatched', value: 'dispatched' },
-  { label: 'Resolved',   value: 'resolved' },
-  { label: 'On Hold',    value: 'on_hold' },
+  { label: 'All',         value: 'all' },
+  { label: 'Open',        value: 'open' },
+  { label: 'Dispatched',  value: 'dispatched' },
+  { label: 'In Progress', value: 'in_progress' },
+  { label: 'Complete',    value: 'complete' },
+  { label: 'Resolved',    value: 'resolved' },
+  { label: 'Cancelled',   value: 'cancelled' },
 ]
 
 interface Props {

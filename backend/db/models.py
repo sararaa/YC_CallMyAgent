@@ -53,3 +53,16 @@ class CallLog(SQLModel, table=True):
     ended_at: Optional[datetime] = None
     final_state: Optional[str] = None
     duration_s: Optional[float] = None
+
+
+class TechnicianDispatch(SQLModel, table=True):
+    __tablename__ = "technicianDispatch"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    work_order_id: int = Field(index=True, unique=True)  # one dispatch per WO
+    technician_email: str
+    agentmail_inbox_id: str = Field(index=True)  # hot path for webhook lookup
+    agentmail_client_id: str                      # == f"wo-{work_order_id}"
+    status: str = "pending"   # pending | dispatched | in_progress | complete
+    email_thread: str = "[]"  # JSON list of {direction, from, subject, body, timestamp}
+    dispatched_at: datetime = Field(default_factory=_now)
+    completed_at: Optional[datetime] = None
