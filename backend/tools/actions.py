@@ -254,6 +254,99 @@ async def create_work_order(
     return {"work_order_id": woid, "status": "open"}
 
 
+async def dispatch_technician(
+    s: CallSession,
+    work_order_id: int,
+    technician_email: str = "",
+    reason: str | None = None,
+    confidence: float | None = None,
+    **_kw,
+) -> dict:
+    from backend import config
+    from backend.agentmail_client import am_client
+    from backend.db.session import get_session
+    from sqlmodel import select
+
+    confidence = _clamp(confidence)
+    if confidence is not None:
+        s.confidence_samples.append(confidence)
+
+    # Verify the WO belongs to this session
+    with get_session() as db:
+        wo = db.get(models.WorkOrder, work_order_id)
+        if not wo:
+            return {"error": f"work order {work_order_id} not found"}
+        if wo.session_id != s.session_id:
+            return {"error": "work order does not belong to this session"}
+
+        # Idempotent: skip if already dispatched
+        existing = db.exec(
+            select(models.TechnicianDispatch).where(models.TechnicianDispatch.work_order_id == work_order_id)
+        ).first()
+        if existing:
+            return {"dispatched": True, "inbox_id": existing.agentmail_inbox_id, "already_existed": True}
+
+    import json
+    from datetime import datetime, timezone
+
+    tech_email = technician_email or config.TECHNICIAN_EMAIL
+    inbox = await am_client.create_inbox(work_order_id)
+
+    subject = f"[VoltDispatch] WO-{work_order_id} — {wo.charger_id.upper()} | {wo.severity.upper()}"
+    body_text = (
+        f"Hi,\n\nYou have been assigned Work Order WO-{work_order_id} for charger {wo.charger_id.upper()}.\n\n"
+        f"FAULT SUMMARY\n-------------\n"
+        f"Severity : {wo.severity.upper()}\nCharger  : {wo.charger_id.upper()}\nSymptoms : {wo.symptoms}\n\n"
+        f"TELEMETRY SNAPSHOT\n------------------\n{wo.telemetry_snippet or '(No telemetry snippet)'}\n\n"
+        f"Reply 'accepted' to confirm, ask any questions, or reply 'done' when complete.\n\n— Volt Dispatch System\n"
+    )
+    html_body = "<br>\n".join(
+        body_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").split("\n")
+    )
+
+    await am_client.send_message(inbox_id=inbox.inbox_id, to=tech_email, subject=subject, text=body_text, html=html_body)
+
+    initial_thread = json.dumps([{
+        "direction": "outbound",
+        "from": inbox.email,
+        "subject": subject,
+        "body": body_text,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }])
+
+    with get_session() as db:
+        dispatch = models.TechnicianDispatch(
+            work_order_id=work_order_id,
+            technician_email=tech_email,
+            agentmail_inbox_id=inbox.inbox_id,
+            agentmail_client_id=f"wo-{work_order_id}",
+            status="pending",
+            email_thread=initial_thread,
+        )
+        db.add(dispatch)
+        wo_row = db.get(models.WorkOrder, work_order_id)
+        if wo_row:
+            wo_row.status = "dispatched"
+            db.add(wo_row)
+        db.commit()
+
+    await bus.emit("dispatch_update", s.session_id, {
+        "wo_id": work_order_id,
+        "status": "pending",
+        "technician_email": tech_email,
+        "inbox_id": inbox.inbox_id,
+        "thread_count": 1,
+    })
+    await bus.emit("technician_email", s.session_id, {
+        "wo_id": work_order_id,
+        "direction": "outbound",
+        "from": inbox.email,
+        "subject": subject,
+        "body_preview": body_text[:200],
+    })
+    return {"dispatched": True, "inbox_id": inbox.inbox_id}
+
+
 def _geo_mean(xs: list[float]) -> float | None:
     xs = [max(1e-6, x) for x in xs]
     if not xs:

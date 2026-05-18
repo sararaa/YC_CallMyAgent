@@ -1,6 +1,6 @@
 /**
  * GET /api/workorders — proxies to Python /api/admin/work_orders, adapting
- * the schema to the ChargePulse WorkOrder shape and applying client-style
+ * the schema to the PigeonPlatform WorkOrder shape and applying client-style
  * search/status filtering and pagination.
  */
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -10,21 +10,19 @@ function toFrontendWO(r: Record<string, unknown>): Record<string, unknown> {
   const urgency =
     sev === "critical" || sev === "high" ? "P1" :
     sev === "medium" ? "P2" : "P3";
-  const statusMap: Record<string, string> = {
-    open: "open", in_progress: "dispatched", resolved: "resolved",
-  };
   const created = (r.created_at as string) || new Date().toISOString();
   const id = r.id as number;
+  const rawStatus = String(r.status || "open");
   return {
     id: `wo-${id}`,
     woNumber: `WO-${new Date(created).getFullYear()}-${String(id).padStart(4, "0")}`,
     date: created,
     chargerId: r.charger_id,
-    location: `Volt Network · ${String(r.charger_id || "").toUpperCase()} pad`,
+    location: `PigeonPlatform · ${String(r.charger_id || "").toUpperCase()} pad`,
     customerName: "—",
     faultCode: "—",
     urgency,
-    status: statusMap[String(r.status || "open")] || "open",
+    status: rawStatus,
     assignedTech: null,
     summary: r.symptoms,
     parts: [],
@@ -38,6 +36,7 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const search = (url.searchParams.get("search") || "").toLowerCase();
   const status = url.searchParams.get("status");
+  const sort = url.searchParams.get("sort") || "newest";
   const page = parseInt(url.searchParams.get("page") || "1", 10);
   const limit = parseInt(url.searchParams.get("limit") || "20", 10);
 
@@ -50,6 +49,9 @@ export async function GET(req: Request) {
     }
     if (status && status !== "all") {
       orders = orders.filter((o) => o.status === status);
+    }
+    if (sort === "oldest") {
+      orders = [...orders].reverse();
     }
     const total = orders.length;
     const start = (page - 1) * limit;

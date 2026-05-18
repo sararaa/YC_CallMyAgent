@@ -1,14 +1,14 @@
 'use client'
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X } from 'lucide-react'
+import { X, GitBranch } from 'lucide-react'
 import { useOperatorStore } from '@/store/operatorStore'
 import { STATE_EDGES, STATE_LAYOUT, STATE_SUFFIX, type StateName } from '@/lib/voltTypes'
 
 const VB_W = 1000
-const VB_H = 480
-const NODE_W = 168
-const NODE_H = 72
+const VB_H = 460
+const NODE_W = 160
+const NODE_H = 64
 
 type Status = 'pending' | 'active' | 'visited' | 'eliminated'
 
@@ -30,22 +30,22 @@ function edgeStatus(from: StateName, to: StateName, visited: Set<StateName>, eli
 }
 
 const NODE_FILL: Record<Status, string> = {
-  pending: 'rgba(255,255,255,0.02)',
-  active: 'rgba(0,212,255,0.12)',
-  visited: 'rgba(0,212,255,0.08)',
-  eliminated: 'rgba(255,255,255,0.02)',
+  pending:    '#18181b',
+  active:     '#1e1b4b',
+  visited:    '#1c1917',
+  eliminated: '#111113',
 }
 const NODE_STROKE: Record<Status, string> = {
-  pending: 'rgba(255,255,255,0.08)',
-  active: '#00d4ff',
-  visited: '#00d4ff',
-  eliminated: 'rgba(255,255,255,0.10)',
+  pending:    '#3f3f46',
+  active:     '#6366f1',
+  visited:    '#4f7c5a',
+  eliminated: '#27272a',
 }
 const NODE_TEXT: Record<Status, string> = {
-  pending: '#64748b',
-  active: '#ffffff',
-  visited: '#e2e8f0',
-  eliminated: '#475569',
+  pending:    '#71717a',
+  active:     '#e0e7ff',
+  visited:    '#bbf7d0',
+  eliminated: '#3f3f46',
 }
 
 function curve(x1: number, y1: number, x2: number, y2: number): string {
@@ -58,21 +58,24 @@ export function StateGraph() {
   const [selected, setSelected] = useState<StateName | null>(null)
 
   return (
-    <div className="glass rounded-xl panel-shadow flex flex-col h-full overflow-hidden relative">
-      <div className="flex items-center gap-2.5 px-4 py-3 border-b border-white/[0.06] shrink-0">
-        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-cyan-electric/20 to-cyan-electric/10 flex items-center justify-center">
-          <span className="text-cyan-electric text-[10px] font-bold tracking-widest">SM</span>
+    <div className="panel panel-shadow flex flex-col h-full overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">
+        <div className="flex items-center gap-2">
+          <GitBranch className="w-3.5 h-3.5 text-text-muted" />
+          <span className="text-[15px] font-medium text-text-primary">State machine</span>
+          <span className="text-[15px] text-text-muted">· click a node to inspect</span>
         </div>
-        <div>
-          <p className="text-sm font-semibold text-white">State Machine</p>
-          <p className="text-[10px] text-slate-500">Tool-gated · click a node for details</p>
-        </div>
+        <span className="text-[15px] font-medium text-cyan-electric bg-cyan-electric/10 px-2 py-0.5 rounded-md border border-cyan-electric/20">
+          {currentState}
+        </span>
       </div>
+
       <div className="flex-1 min-h-0 relative">
         <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="w-full h-full">
           <defs>
-            <pattern id="hash" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
-              <line x1="0" y1="0" x2="0" y2="6" stroke="rgba(255,255,255,0.10)" strokeWidth="1" />
+            <pattern id="hash" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)">
+              <line x1="0" y1="0" x2="0" y2="8" stroke="#3f3f46" strokeWidth="1" />
             </pattern>
           </defs>
 
@@ -88,10 +91,10 @@ export function StateGraph() {
               performance.now() - lastTransition.at < 1200
 
             const stroke =
-              status === 'visited' ? '#00d4ff' :
-              status === 'eliminated' ? 'rgba(255,255,255,0.10)' :
-              'rgba(255,255,255,0.12)'
-            const dash = status === 'visited' ? '' : status === 'eliminated' ? '6 6' : '4 4'
+              status === 'visited'    ? '#4f7c5a' :
+              status === 'eliminated' ? '#27272a' :
+              '#3f3f46'
+            const dash = status === 'visited' ? '' : status === 'eliminated' ? '5 5' : '4 4'
 
             const dx = tx - fx, dy = ty - fy
             const len = Math.hypot(dx, dy) || 1
@@ -108,7 +111,7 @@ export function StateGraph() {
                   d={d}
                   fill="none"
                   stroke={stroke}
-                  strokeWidth={status === 'visited' ? 2.5 : 1.8}
+                  strokeWidth={status === 'visited' ? 2 : 1.5}
                   strokeDasharray={dash}
                   initial={isFresh ? { pathLength: 0 } : false}
                   animate={isFresh ? { pathLength: 1 } : {}}
@@ -156,91 +159,118 @@ export function StateGraph() {
   )
 }
 
-function NodeDetail({
-  name, focus, status, onClose,
-}: { name: StateName; focus: string; status: Status; onClose: () => void }) {
+function NodeDetail({ name, focus, status, onClose }: {
+  name: StateName; focus: string; status: Status; onClose: () => void
+}) {
   const label = STATE_LAYOUT[name as Exclude<StateName, 'ended'>]?.label || name
   const suffix = STATE_SUFFIX[name as Exclude<StateName, 'ended'>] || ''
-  const accent =
-    status === 'active' ? 'border-cyan-electric/60 shadow-[0_0_30px_rgba(0,212,255,0.15)]' :
-    status === 'visited' ? 'border-cyan-electric/30' :
-    status === 'eliminated' ? 'border-white/[0.08] opacity-80' :
-    'border-white/[0.12]'
 
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.92, y: 12 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.95, y: 6 }}
-      transition={{ duration: 0.22, ease: [0.165, 0.84, 0.44, 1] }}
-      className={`absolute bottom-4 left-1/2 -translate-x-1/2 w-[min(640px,calc(100%-32px))] z-20 rounded-xl border bg-bg-base/95 backdrop-blur-md p-4 ${accent}`}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 4 }}
+      transition={{ duration: 0.18, ease: 'easeOut' }}
+      className="absolute bottom-3 left-1/2 -translate-x-1/2 w-[min(600px,calc(100%-24px))] z-20 rounded-lg bg-bg-card border border-border p-4 shadow-xl"
     >
-      <button
-        onClick={onClose}
-        className="absolute top-2 right-2 text-slate-500 hover:text-white p-1 rounded-md hover:bg-white/[0.05]"
-      >
+      <button onClick={onClose} className="absolute top-3 right-3 text-text-muted hover:text-text-secondary p-1 rounded transition-colors">
         <X className="w-3.5 h-3.5" />
       </button>
-      <div className="flex items-baseline gap-2 mb-2">
-        <span className="text-[10px] uppercase tracking-widest text-cyan-electric font-bold">{status}</span>
-        <h3 className="text-base font-semibold text-white">{label}</h3>
+      <div className="flex items-center gap-2 mb-3">
+        <span className={cn(
+          'text-[15px] font-semibold px-2 py-0.5 rounded uppercase tracking-wider',
+          status === 'active'     ? 'bg-cyan-electric/15 text-cyan-electric border border-cyan-electric/25' :
+          status === 'visited'    ? 'bg-green-neon/10 text-green-neon/80 border border-green-neon/20' :
+          status === 'eliminated' ? 'bg-bg-hover text-text-muted border border-border' :
+          'bg-bg-hover text-text-muted border border-border'
+        )}>
+          {status}
+        </span>
+        <h3 className="text-[15px] font-semibold text-text-primary">{label}</h3>
       </div>
       {focus && (
-        <div className="mb-3">
-          <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Current focus</p>
-          <p className="text-[13px] text-slate-100 leading-relaxed italic">"{focus}"</p>
+        <div className="mb-3 pl-3 border-l-2 border-cyan-electric/40">
+          <p className="text-[15px] text-text-muted mb-0.5">Current focus</p>
+          <p className="text-[15px] text-text-secondary italic">"{focus}"</p>
         </div>
       )}
       <div>
-        <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Stage instructions</p>
-        <p className="text-[12px] text-slate-300 leading-relaxed whitespace-pre-wrap">{suffix}</p>
+        <p className="text-[15px] text-text-muted mb-1">Stage prompt</p>
+        <p className="text-[15px] text-text-secondary leading-relaxed">{suffix}</p>
       </div>
     </motion.div>
   )
 }
 
-function Node({
-  cx, cy, label, status, focus, onClick,
-}: { cx: number; cy: number; label: string; status: Status; focus: string; onClick: () => void }) {
+function cn(...classes: (string | false | undefined)[]) {
+  return classes.filter(Boolean).join(' ')
+}
+
+function Node({ cx, cy, label, status, focus, onClick }: {
+  cx: number; cy: number; label: string; status: Status; focus: string; onClick: () => void
+}) {
   const x = cx - NODE_W / 2
   const y = cy - NODE_H / 2
   const isActive = status === 'active'
   const showFocus = focus && (isActive || status === 'visited')
-  const labelY = showFocus ? cy - 8 : cy + 5
-  const truncated = focus.length > 28 ? focus.slice(0, 27) + '…' : focus
+  const labelY = showFocus ? cy - 6 : cy + 5
+  const truncated = focus.length > 24 ? focus.slice(0, 23) + '…' : focus
+
   return (
-    <g onClick={onClick} style={{ cursor: 'pointer' }}>
+    <g onClick={onClick} style={{ cursor: 'pointer' }} role="button">
+      {/* Active pulse ring */}
       {isActive && (
         <motion.rect
-          x={x - 8} y={y - 8} width={NODE_W + 16} height={NODE_H + 16} rx={16}
-          fill="#00d4ff" opacity={0.2}
-          initial={{ opacity: 0.35, scale: 1 }}
-          animate={{ opacity: 0, scale: 1.18 }}
-          transition={{ duration: 1.5, repeat: Infinity, ease: 'easeOut' }}
+          x={x - 6} y={y - 6} width={NODE_W + 12} height={NODE_H + 12} rx={13}
+          fill="none"
+          stroke="#6366f1"
+          strokeWidth={1.5}
+          initial={{ opacity: 0.5, scale: 1 }}
+          animate={{ opacity: 0, scale: 1.12 }}
+          transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut' }}
           style={{ transformOrigin: `${cx}px ${cy}px` }}
         />
       )}
+
+      {/* Node body */}
       <motion.rect
-        x={x} y={y} width={NODE_W} height={NODE_H} rx={12}
-        fill={NODE_FILL[status]} stroke={NODE_STROKE[status]} strokeWidth={isActive ? 3 : 2}
-        strokeDasharray={status === 'eliminated' ? '5 4' : ''}
+        x={x} y={y} width={NODE_W} height={NODE_H} rx={8}
+        fill={NODE_FILL[status]}
+        stroke={NODE_STROKE[status]}
+        strokeWidth={isActive ? 1.5 : 1}
+        strokeDasharray={status === 'eliminated' ? '4 3' : ''}
         animate={{ fill: NODE_FILL[status], stroke: NODE_STROKE[status] }}
-        transition={{ duration: 0.4 }}
+        transition={{ duration: 0.35 }}
       />
+
+      {/* Eliminated hash overlay */}
       {status === 'eliminated' && (
-        <rect x={x} y={y} width={NODE_W} height={NODE_H} rx={12} fill="url(#hash)" />
+        <rect x={x} y={y} width={NODE_W} height={NODE_H} rx={8} fill="url(#hash)" opacity={0.4} />
       )}
+
+      {/* Visited checkmark */}
       {status === 'visited' && (
-        <g transform={`translate(${x + NODE_W - 16}, ${y + 12})`}>
-          <circle r={7} fill="#00d4ff" />
-          <path d="M -3 0 L -1 2.2 L 3 -2.5" stroke="#0a0a0f" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+        <g transform={`translate(${x + NODE_W - 14}, ${y + 10})`}>
+          <path d="M -4 0 L -1.5 2.5 L 4 -3" stroke="#4ade80" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
         </g>
       )}
-      <text x={cx} y={labelY} textAnchor="middle" fontSize="14" fontWeight={isActive ? 600 : 500} fill={NODE_TEXT[status]}>
+
+      {/* Label */}
+      <text
+        x={cx} y={labelY}
+        textAnchor="middle"
+        fontSize="15"
+        fontWeight={isActive ? 600 : 500}
+        fontFamily="var(--font-geist-sans)"
+        fill={NODE_TEXT[status]}
+        letterSpacing="-0.01em"
+      >
         {label}
       </text>
+
+      {/* Focus text */}
       {showFocus && (
-        <text x={cx} y={cy + 12} textAnchor="middle" fontSize="10" fontStyle="italic" fill={isActive ? '#00d4ff' : '#94a3b8'} opacity={0.85}>
+        <text x={cx} y={cy + 14} textAnchor="middle" fontSize="11" fill={isActive ? '#818cf8' : '#52525b'} fontStyle="italic">
           {truncated}
         </text>
       )}
@@ -251,12 +281,13 @@ function Node({
 function ForkBadge({ x, y, confidence }: { x: number; y: number; confidence: number }) {
   return (
     <motion.g
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.4, delay: 0.2 }}
+      initial={{ opacity: 0, scale: 0.8 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.3, delay: 0.15 }}
+      style={{ transformOrigin: `${x}px ${y}px` }}
     >
-      <rect x={x - 26} y={y - 11} width={52} height={22} rx={11} fill="#0a0a0f" stroke="#00d4ff" />
-      <text x={x} y={y + 4} textAnchor="middle" fontSize="11" fontWeight={600} fill="#00d4ff" style={{ fontVariantNumeric: 'tabular-nums' }}>
+      <rect x={x - 24} y={y - 10} width={48} height={20} rx={10} fill="#1e1b4b" stroke="#6366f1" strokeWidth={1} />
+      <text x={x} y={y + 4} textAnchor="middle" fontSize="12" fontWeight={600} fill="#818cf8" fontFamily="var(--font-geist-mono)">
         {confidence.toFixed(2)}
       </text>
     </motion.g>

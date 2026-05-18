@@ -4,6 +4,7 @@ import { useOperatorStore } from '@/store/operatorStore'
 import { useCallStore } from '@/store/callStore'
 import { cn } from '@/lib/utils'
 import type { MemoryCard, MemoryTier } from '@/lib/voltTypes'
+import { Database } from 'lucide-react'
 
 function fmtMs(ms: number): string {
   if (ms < 1) return '<1ms'
@@ -15,42 +16,56 @@ const LANES: Array<{
   tier: MemoryTier
   label: string
   sub: (phone: string | null) => string
-  accent: string
-  glow: string
+  dot: string
+  ring: string
 }> = [
-  { tier: 'session',   label: 'SESSION CACHE', sub: () => 'Moss · current session · <10ms', accent: 'text-cyan-electric',   glow: 'shadow-[0_0_20px_rgba(0,212,255,0.10)]' },
-  { tier: 'knowledge', label: 'KNOWLEDGE',     sub: () => 'Moss · volt-kb · <10ms',          accent: 'text-violet-electric', glow: 'shadow-[0_0_20px_rgba(124,58,237,0.10)]' },
-  { tier: 'long_term', label: 'LONG-TERM',     sub: (p) => `Supermemory · ${p || '—'} · ~80ms`, accent: 'text-amber-warn',    glow: 'shadow-[0_0_20px_rgba(245,158,11,0.10)]' },
+  {
+    tier: 'session',
+    label: 'Session cache',
+    sub: () => 'Moss · active session · <10ms',
+    dot: 'bg-cyan-electric',
+    ring: 'border-cyan-electric/20',
+  },
+  {
+    tier: 'knowledge',
+    label: 'Knowledge base',
+    sub: () => 'Moss · volt-kb · <10ms',
+    dot: 'bg-violet-electric',
+    ring: 'border-violet-electric/20',
+  },
+  {
+    tier: 'long_term',
+    label: 'Long-term',
+    sub: (p) => `Supermemory · ${p ?? '—'} · ~80ms`,
+    dot: 'bg-amber-warn',
+    ring: 'border-amber-warn/20',
+  },
 ]
 
-function Card({ tier, cards, accent }: { tier: MemoryTier; cards: MemoryCard[]; accent: string }) {
+function MemoryChunk({ card, tier }: { card: MemoryCard; tier: MemoryTier }) {
   return (
-    <AnimatePresence initial={false}>
-      {cards.map((c) => (
-        <motion.div
-          key={c.id}
-          layoutId={c.id}
-          initial={{
-            opacity: 0,
-            x: tier === 'long_term' ? 24 : tier === 'session' ? -24 : 0,
-            y: tier === 'knowledge' ? -8 : 0,
-          }}
-          animate={{ opacity: 1, x: 0, y: 0 }}
-          exit={{ opacity: 0, scale: 0.9 }}
-          transition={{ type: 'spring', stiffness: 200, damping: 22 }}
-          className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2.5"
-        >
-          <div className="flex items-start justify-between gap-2">
-            <p className={cn('text-[12px] leading-snug text-slate-200 line-clamp-2')}>{c.text}</p>
-            <span className={cn('h-1.5 w-1.5 rounded-full mt-1 flex-none', c.hit ? 'bg-green-neon' : 'bg-slate-600')} />
-          </div>
-          <div className="mt-1 flex items-center justify-between text-[10.5px] text-slate-500 font-mono">
-            <span className="truncate max-w-[70%]">{c.source || '—'}</span>
-            <span>{fmtMs(c.latencyMs)}</span>
-          </div>
-        </motion.div>
-      ))}
-    </AnimatePresence>
+    <motion.div
+      key={card.id}
+      layoutId={card.id}
+      initial={{
+        opacity: 0,
+        x: tier === 'long_term' ? 20 : tier === 'session' ? -20 : 0,
+        y: tier === 'knowledge' ? -6 : 0,
+      }}
+      animate={{ opacity: 1, x: 0, y: 0 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ type: 'spring', stiffness: 240, damping: 24 }}
+      className="bg-bg-base border border-border rounded-md p-2.5 group"
+    >
+      <div className="flex items-start gap-2">
+        <p className="text-[11.5px] text-text-secondary leading-snug line-clamp-2 flex-1">{card.text}</p>
+        <span className={cn('w-1.5 h-1.5 rounded-full mt-1 shrink-0', card.hit ? 'bg-green-neon' : 'bg-text-muted opacity-40')} />
+      </div>
+      <div className="mt-1.5 flex items-center justify-between">
+        <span className="text-[15px] font-mono text-text-muted truncate max-w-[70%]">{card.source || '—'}</span>
+        <span className="text-[15px] font-mono text-text-muted">{fmtMs(card.latencyMs)}</span>
+      </div>
+    </motion.div>
   )
 }
 
@@ -59,27 +74,31 @@ export function MemoryWall() {
   const callerPhone = useCallStore((s) => s.callerId)
 
   return (
-    <div className="glass rounded-xl panel-shadow flex flex-col h-full overflow-hidden">
-      <div className="flex items-center gap-2.5 px-4 py-3 border-b border-white/[0.06] shrink-0">
-        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-electric/20 to-violet-electric/10 flex items-center justify-center">
-          <span className="text-violet-electric text-[10px] font-bold tracking-widest">MEM</span>
-        </div>
-        <div>
-          <p className="text-sm font-semibold text-white">Memory Wall</p>
-          <p className="text-[10px] text-slate-500">Three tiers · preload from cold to hot</p>
-        </div>
+    <div className="panel panel-shadow flex flex-col h-full overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border shrink-0">
+        <Database className="w-3.5 h-3.5 text-text-muted" />
+        <span className="text-[15px] font-medium text-text-primary">Memory</span>
+        <span className="text-[15px] text-text-muted">· three-tier cache</span>
       </div>
-      <div className="flex-1 grid grid-cols-3 gap-2 p-2 min-h-0">
-        {LANES.map((l) => (
-          <div key={l.tier} className={cn('flex flex-col rounded-lg border border-white/[0.06] bg-white/[0.01] overflow-hidden', l.glow)}>
-            <div className="px-2 py-1.5 border-b border-white/[0.06]">
-              <p className={cn('text-[10px] font-bold tracking-widest', l.accent)}>{l.label}</p>
-              <p className="text-[9.5px] text-slate-500 font-mono">{l.sub(callerPhone)}</p>
+
+      <div className="flex-1 grid grid-cols-3 divide-x divide-border min-h-0">
+        {LANES.map((lane) => (
+          <div key={lane.tier} className="flex flex-col min-h-0 overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
+              <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', lane.dot)} />
+              <div>
+                <p className="text-[15px] font-medium text-text-secondary">{lane.label}</p>
+                <p className="text-[15px] font-mono text-text-muted">{lane.sub(callerPhone)}</p>
+              </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-1.5 space-y-1.5 min-h-0">
-              <Card tier={l.tier} cards={memory[l.tier]} accent={l.accent} />
-              {memory[l.tier].length === 0 && (
-                <div className="text-[10px] text-slate-600 text-center py-4">Idle.</div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1.5 min-h-0">
+              <AnimatePresence initial={false}>
+                {memory[lane.tier].map((card) => (
+                  <MemoryChunk key={card.id} card={card} tier={lane.tier} />
+                ))}
+              </AnimatePresence>
+              {memory[lane.tier].length === 0 && (
+                <p className="text-[15px] text-text-muted text-center py-6">Empty</p>
               )}
             </div>
           </div>

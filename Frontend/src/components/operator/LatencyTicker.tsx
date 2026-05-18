@@ -7,7 +7,7 @@ const THRESH: Record<LatencyComponent, number> = {
   gemini: 600, moss_session: 15, moss_kb: 15, supermemory: 120,
 }
 const LABEL: Record<LatencyComponent, string> = {
-  gemini: 'G', moss_session: 'MS', moss_kb: 'MK', supermemory: 'SM',
+  gemini: 'Gemini', moss_session: 'Moss·S', moss_kb: 'Moss·KB', supermemory: 'SM',
 }
 
 function fmtMs(ms: number | null): string {
@@ -24,7 +24,7 @@ function rollingMean(values: number[], n = 5): number | null {
 }
 
 function color(component: LatencyComponent, ms: number | null): string {
-  if (ms == null) return 'text-slate-500'
+  if (ms == null) return 'text-text-muted'
   const t = THRESH[component]
   if (ms <= t) return 'text-green-neon'
   if (ms <= t * 2) return 'text-amber-warn'
@@ -34,14 +34,15 @@ function color(component: LatencyComponent, ms: number | null): string {
 export function LatencyTicker() {
   const latency = useOperatorStore((s) => s.latency)
   return (
-    <div className="flex items-center gap-3 text-xs">
-      <span className="text-slate-500 uppercase tracking-wider text-[10px]">Latency</span>
+    <div className="flex items-center gap-3">
       {(Object.keys(LABEL) as LatencyComponent[]).map((c) => {
         const ms = rollingMean(latency[c], 5)
         return (
-          <div key={c} className="flex items-baseline gap-1 font-mono">
-            <span className="text-slate-500">{LABEL[c]}</span>
-            <span className={cn('font-semibold', color(c, ms))}>{fmtMs(ms)}</span>
+          <div key={c} className="flex items-center gap-1">
+            <span className="text-[15px] text-text-muted">{LABEL[c]}</span>
+            <span className={cn('text-[15px] font-mono font-semibold tabular-nums', color(c, ms))}>
+              {fmtMs(ms)}
+            </span>
           </div>
         )
       })}

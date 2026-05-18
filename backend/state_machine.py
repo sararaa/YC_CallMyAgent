@@ -88,9 +88,10 @@ STATES = {
             "  2. Call get_charger_telemetry to corroborate the fault.\n"
             "  3. Call recall_knowledge for the matching hardware guide (optional but recommended).\n"
             "  4. Call create_work_order with severity, symptoms, and a telemetry_snippet.\n"
-            "  5. Tell the caller what was opened and the ETA, then advance_to_wrap_up."
+            "  5. Call dispatch_technician with the work_order_id returned by create_work_order.\n"
+            "  6. Tell the caller what was opened and the ETA, then advance_to_wrap_up."
         ),
-        "tools": ["recall_session", "recall_knowledge", "get_charger_telemetry", "create_work_order", "advance_to_wrap_up"],
+        "tools": ["recall_session", "recall_knowledge", "get_charger_telemetry", "create_work_order", "dispatch_technician", "advance_to_wrap_up"],
     },
     "wrap_up": {
         "suffix": (
@@ -124,7 +125,7 @@ LAYOUT = {
 
 ALL_TOOLS = [
     "recall_session", "recall_knowledge", "get_charger_telemetry",
-    "send_remote_command", "create_work_order", "generate_report",
+    "send_remote_command", "create_work_order", "dispatch_technician", "generate_report",
     "advance_to_scoping", "advance_to_triage",
     "route_to_user_issue", "route_to_software_issue", "route_to_hardware_issue",
     "advance_to_wrap_up", "end_call",

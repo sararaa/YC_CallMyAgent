@@ -4,49 +4,47 @@ import { cn } from '@/lib/utils'
 import { WOStatus } from '@/lib/types'
 
 const STATUSES: { label: string; value: 'all' | WOStatus }[] = [
-  { label: 'All', value: 'all' },
-  { label: 'Open', value: 'open' },
-  { label: 'Dispatched', value: 'dispatched' },
-  { label: 'Resolved', value: 'resolved' },
-  { label: 'On Hold', value: 'on_hold' },
+  { label: 'All',         value: 'all' },
+  { label: 'Open',        value: 'open' },
+  { label: 'Dispatched',  value: 'dispatched' },
+  { label: 'In Progress', value: 'in_progress' },
+  { label: 'Complete',    value: 'complete' },
+  { label: 'Resolved',    value: 'resolved' },
+  { label: 'Cancelled',   value: 'cancelled' },
 ]
 
 interface Props {
-  search: string
-  onSearch: (v: string) => void
-  status: string
-  onStatus: (v: string) => void
-  sort: string
-  onSort: (v: string) => void
-  view: 'table' | 'grid'
-  onView: (v: 'table' | 'grid') => void
+  search: string; onSearch: (v: string) => void
+  status: string; onStatus: (v: string) => void
+  sort: string;   onSort: (v: string) => void
+  view: 'table' | 'grid'; onView: (v: 'table' | 'grid') => void
 }
 
 export function FilterBar({ search, onSearch, status, onStatus, sort, onSort, view, onView }: Props) {
   return (
-    <div className="flex flex-wrap items-center gap-3">
+    <div className="flex flex-wrap items-center gap-2">
       {/* Search */}
-      <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2 flex-1 min-w-48">
-        <Search className="w-4 h-4 text-slate-500 shrink-0" />
+      <div className="flex items-center gap-2 bg-bg-card border border-border rounded-md px-3 py-1.5 flex-1 min-w-52">
+        <Search className="w-3.5 h-3.5 text-text-muted shrink-0" />
         <input
           value={search}
           onChange={(e) => onSearch(e.target.value)}
-          placeholder="Search WO#, charger, fault..."
-          className="bg-transparent text-sm text-slate-200 placeholder:text-slate-600 flex-1 outline-none"
+          placeholder="Search by WO#, charger, fault…"
+          className="bg-transparent text-[15px] text-text-primary placeholder:text-text-muted flex-1 outline-none"
         />
       </div>
 
-      {/* Status chips */}
-      <div className="flex items-center gap-1.5 flex-wrap">
+      {/* Status tabs */}
+      <div className="flex items-center bg-bg-card border border-border rounded-md p-0.5">
         {STATUSES.map((s) => (
           <button
             key={s.value}
             onClick={() => onStatus(s.value)}
             className={cn(
-              'px-3 py-1.5 rounded-full text-xs font-medium transition-all',
+              'px-2.5 py-1 rounded text-[15px] font-medium transition-colors',
               status === s.value
-                ? 'bg-cyan-electric text-bg-base font-semibold'
-                : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 border border-white/10'
+                ? 'bg-bg-hover text-text-primary'
+                : 'text-text-muted hover:text-text-secondary'
             )}
           >
             {s.label}
@@ -60,35 +58,32 @@ export function FilterBar({ search, onSearch, status, onStatus, sort, onSort, vi
       <select
         value={sort}
         onChange={(e) => onSort(e.target.value)}
-        className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-slate-300 outline-none"
+        className="bg-bg-card border border-border rounded-md px-2.5 py-1.5 text-[15px] text-text-secondary outline-none cursor-pointer"
       >
-        <option value="newest" className="bg-slate-900">Newest</option>
-        <option value="oldest" className="bg-slate-900">Oldest</option>
-        <option value="urgency" className="bg-slate-900">Urgency</option>
+        <option value="newest">Newest first</option>
+        <option value="oldest">Oldest first</option>
+        <option value="urgency">By urgency</option>
       </select>
 
       {/* View toggle */}
-      <div className="flex items-center bg-white/5 rounded-xl border border-white/10 p-1">
+      <div className="flex items-center bg-bg-card border border-border rounded-md p-0.5">
         <button
           onClick={() => onView('table')}
-          className={cn('p-1.5 rounded-lg transition-colors', view === 'table' ? 'bg-white/15 text-white' : 'text-slate-500 hover:text-slate-300')}
+          className={cn('p-1.5 rounded transition-colors', view === 'table' ? 'bg-bg-hover text-text-primary' : 'text-text-muted hover:text-text-secondary')}
         >
-          <List className="w-4 h-4" />
+          <List className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={() => onView('grid')}
-          className={cn('p-1.5 rounded-lg transition-colors', view === 'grid' ? 'bg-white/15 text-white' : 'text-slate-500 hover:text-slate-300')}
+          className={cn('p-1.5 rounded transition-colors', view === 'grid' ? 'bg-bg-hover text-text-primary' : 'text-text-muted hover:text-text-secondary')}
         >
-          <LayoutGrid className="w-4 h-4" />
+          <LayoutGrid className="w-3.5 h-3.5" />
         </button>
       </div>
 
       {/* Export */}
-      <button
-        onClick={() => console.log('Export CSV')}
-        className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-      >
-        <Download className="w-4 h-4" />
+      <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-border text-[15px] text-text-muted hover:text-text-secondary hover:bg-bg-hover transition-colors">
+        <Download className="w-3.5 h-3.5" />
         Export
       </button>
     </div>

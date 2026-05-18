@@ -1,4 +1,9 @@
 # Usage
+# Backend (from project root)
+python3 -m uvicorn backend.main:app --port 8001
+
+# Frontend (from Frontend/)
+cd Frontend && npm run dev
 
 Four terminals total. Three stay running, one is for one-shot setup.
 

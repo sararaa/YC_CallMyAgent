@@ -10,46 +10,38 @@ export function WorkOrderCard({ wo, index = 0 }: { wo: WorkOrder; index?: number
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.05 }}
+      transition={{ delay: index * 0.04 }}
     >
       <Link href={`/work-orders/${wo.id}`}>
         <div
-          className="glass rounded-xl p-4 cursor-pointer transition-all duration-300 hover:-translate-y-1 group"
-          style={{
-            borderLeft: `3px solid ${color}`,
-            boxShadow: `0 0 0 0 ${color}00`,
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 20px ${color}20, 0 4px 24px rgba(0,0,0,0.4)`
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 0 0 ${color}00`
-          }}
+          className="panel p-4 cursor-pointer transition-colors hover:bg-bg-hover group"
+          style={{ borderLeftColor: color, borderLeftWidth: '2px' }}
         >
           <div className="flex items-start justify-between gap-2 mb-3">
             <div>
-              <p className="text-xs font-mono text-cyan-electric">{wo.woNumber}</p>
-              <p className="text-[10px] text-slate-500">{formatDate(wo.date)}</p>
+              <p className="text-[15px] font-mono text-cyan-electric">{wo.woNumber}</p>
+              <p className="text-[15px] text-text-muted mt-0.5">{formatDate(wo.date)}</p>
             </div>
-            <div className="flex gap-1.5">
-              <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${urgencyBg(wo.urgency)}`}>{wo.urgency}</span>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${statusBg(wo.status)}`}>{statusLabel(wo.status)}</span>
+            <div className="flex gap-1">
+              <span className={`text-[15px] px-1.5 py-0.5 rounded font-semibold ${urgencyBg(wo.urgency)}`}>{wo.urgency}</span>
+              <span className={`text-[15px] px-1.5 py-0.5 rounded font-semibold ${statusBg(wo.status)}`}>{statusLabel(wo.status)}</span>
             </div>
           </div>
 
-          <p className="text-base font-bold text-white font-mono mb-1">{wo.chargerId}</p>
-          <div className="flex items-center gap-1 text-xs text-slate-500 mb-2">
-            <MapPin className="w-3 h-3" />
+          <p className="text-[15px] font-semibold font-mono text-text-primary mb-1">{wo.chargerId}</p>
+          <div className="flex items-center gap-1 text-[15px] text-text-muted mb-2">
+            <MapPin className="w-3 h-3 shrink-0" />
             <span className="truncate">{wo.location}</span>
           </div>
-
-          <p className="text-xs font-mono text-amber-400 mb-3">{wo.faultCode}</p>
+          {wo.faultCode !== '—' && (
+            <p className="text-[15px] font-mono text-amber-warn/70 mb-3">{wo.faultCode}</p>
+          )}
 
           <div className="flex items-center justify-between">
-            <span className="text-xs text-slate-500">{wo.assignedTech || 'Unassigned'}</span>
-            <ArrowRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-electric transition-colors" />
+            <span className="text-[15px] text-text-muted">{wo.assignedTech || 'Unassigned'}</span>
+            <ArrowRight className="w-3.5 h-3.5 text-text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
         </div>
       </Link>

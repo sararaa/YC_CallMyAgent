@@ -24,16 +24,16 @@ export default function WorkOrdersPage() {
   }, [search, status, sort])
 
   return (
-    <div className="p-4 md:p-6 max-w-screen-xl mx-auto">
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
-        <div className="flex items-center gap-3 mb-1">
-          <ClipboardList className="w-6 h-6 text-cyan-electric" />
-          <h1 className="text-2xl font-bold text-white">Work Orders</h1>
+    <div className="p-5 max-w-screen-xl mx-auto">
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mb-5">
+        <div className="flex items-center gap-2.5 mb-0.5">
+          <ClipboardList className="w-4.5 h-4.5 text-text-muted" />
+          <h1 className="text-[20px] font-semibold text-text-primary">Work Orders</h1>
+          <span className="text-[15px] text-text-muted ml-1">{orders.length} total</span>
         </div>
-        <p className="text-sm text-slate-500 ml-9">{orders.length} orders found</p>
       </motion.div>
 
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="mb-4">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }} className="mb-4">
         <FilterBar
           search={search} onSearch={setSearch}
           status={status} onStatus={setStatus}
@@ -43,20 +43,20 @@ export default function WorkOrdersPage() {
       </motion.div>
 
       {loading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="h-14 rounded-xl bg-white/5 animate-pulse" />
+        <div className="space-y-1.5">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-11 rounded-md bg-bg-card border border-border animate-pulse" />
           ))}
         </div>
       ) : orders.length === 0 ? (
-        <div className="text-center py-24 text-slate-600">
-          <ClipboardList className="w-12 h-12 mx-auto mb-3 opacity-30" />
-          <p className="text-sm">No work orders match your filters</p>
+        <div className="text-center py-24 text-text-muted">
+          <ClipboardList className="w-10 h-10 mx-auto mb-3 opacity-20" />
+          <p className="text-[15px]">No work orders match your filters</p>
         </div>
       ) : view === 'table' ? (
         <WorkOrderTable orders={orders} />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
           {orders.map((wo, i) => (
             <WorkOrderCard key={wo.id} wo={wo} index={i} />
           ))}
