@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -27,7 +28,9 @@ class _MessagePayload(BaseModel):
     from_addr: str = Field(alias="from", default="")
     subject: str = ""
     extracted_text: str = Field(alias="extractedText", default="")
+    preview: str = ""
     text: str = ""
+    html: str = ""
 
     class Config:
         populate_by_name = True
@@ -35,7 +38,17 @@ class _MessagePayload(BaseModel):
 
     @property
     def body(self) -> str:
-        return self.extracted_text or self.text
+        # extracted_text = new text only (stripped of quoted replies) — prefer this
+        # preview = short plain-text snippet — good fallback
+        # text = full email including quoted thread — next resort
+        # html = strip tags as last resort (some clients send HTML-only)
+        plain = self.extracted_text or self.preview or self.text
+        if plain:
+            return plain
+        if self.html:
+            stripped = re.sub(r"<[^>]+>", " ", self.html)
+            return re.sub(r"\s+", " ", stripped).strip()
+        return ""
 
     @property
     def sender(self) -> str:
@@ -77,6 +90,7 @@ def _verify_hmac(raw_body: bytes, headers) -> None:
 @router.post("/webhooks/agentmail", status_code=200)
 async def agentmail_webhook(request: Request) -> dict:
     raw_body = await request.body()
+    log.info("RAW AgentMail webhook: %s", raw_body[:1200].decode("utf-8", errors="replace"))
     _verify_hmac(raw_body, request.headers)
 
     payload = WebhookPayload.model_validate(json.loads(raw_body))
@@ -92,6 +106,11 @@ async def agentmail_webhook(request: Request) -> dict:
 
     msg = payload.message
     log.info("Webhook message.received inbox=%s message=%s from=%s", msg.inbox_id, msg.message_id, msg.sender)
+    log.info("Webhook body fields: extracted_text=%r preview=%r text=%r body=%r",
+             msg.extracted_text[:80] if msg.extracted_text else None,
+             msg.preview[:80] if msg.preview else None,
+             msg.text[:80] if msg.text else None,
+             msg.body[:80] if msg.body else None)
 
     # Look up the dispatch record by inbox_id
     with get_session() as db:

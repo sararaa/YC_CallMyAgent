@@ -43,16 +43,16 @@ _CLASSIFIER_TOOLS = [{"function_declarations": [
     {
         "name": "classify_accepted",
         "description": "Technician accepted the dispatch (e.g. 'accepted', 'on my way', 'confirmed', 'will attend', 'heading over').",
-        "parameters": {"type": "object", "properties": {}, "required": []},
+        "parameters": {"type": "OBJECT", "properties": {}, "required": []},
     },
     {
         "name": "classify_question",
         "description": "Technician is asking a factual question about the charger, fault history, parts, or repair procedure.",
         "parameters": {
-            "type": "object",
+            "type": "OBJECT",
             "properties": {
                 "question_text": {
-                    "type": "string",
+                    "type": "STRING",
                     "description": "The specific question, extracted verbatim or paraphrased concisely.",
                 }
             },
@@ -63,10 +63,10 @@ _CLASSIFIER_TOOLS = [{"function_declarations": [
         "name": "classify_done",
         "description": "Technician reports the job is complete (e.g. 'done', 'fixed', 'resolved', 'completed', 'finished', 'all good').",
         "parameters": {
-            "type": "object",
+            "type": "OBJECT",
             "properties": {
                 "resolution_note": {
-                    "type": "string",
+                    "type": "STRING",
                     "description": "Brief summary of what was done, if the technician stated it. Empty string if not mentioned.",
                 }
             },
@@ -76,7 +76,7 @@ _CLASSIFIER_TOOLS = [{"function_declarations": [
     {
         "name": "classify_unclear",
         "description": "Intent cannot be clearly determined from the email. Use only if none of the above fit.",
-        "parameters": {"type": "object", "properties": {}, "required": []},
+        "parameters": {"type": "OBJECT", "properties": {}, "required": []},
     },
 ]}]
 
@@ -368,8 +368,8 @@ async def _classify(wo: models.WorkOrder, extracted_text: str) -> tuple[str, str
                 if fn == "classify_done":
                     return "done", "", args.get("resolution_note", "")
                 return "unclear", "", ""
-    except Exception as e:
-        log.warning("Gemini classify failed, using keywords: %s", e)
+    except Exception:
+        log.exception("Gemini classify failed, using keywords")
 
     return _keyword_classify(extracted_text)
 
@@ -392,8 +392,9 @@ async def handle_technician_email(
 
     await _emit_events(dispatch, wo, "inbound", from_email, subject, extracted_text)
 
+    log.info("WO-%d classifying body (len=%d): %r", wo.id, len(extracted_text), extracted_text[:120])
     intent, question_text, resolution_note = await _classify(wo, extracted_text)
-    log.info("WO-%d intent=%s", wo.id, intent)
+    log.info("WO-%d intent=%s question=%r", wo.id, intent, question_text[:80] if question_text else "")
 
     if intent == "accepted":
         await _handle_accepted(dispatch, wo, subject, message_id)
