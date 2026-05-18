@@ -153,80 +153,109 @@ def _similar_enough(a: str, b: str) -> bool:
 # previously-cached `pending_reply`, so AgentPhone is never blocked.
 
 
-async def _debounced_turn(s, req_id: str, t_arrival: float) -> None:
+async def _debounced_turn(s, req_id: str, t_arrival: float) -> str:
     """Wait for a quiet period, then run a real Gemini turn on the latest
     coalesced transcript. Designed to be cancelled freely while sleeping
     or while waiting on the session lock.
 
+    Returns the agent's reply text (or "" on no-op / abort), so the webhook
+    handler that scheduled this task can await it and return the reply on
+    the SAME HTTP response that closed the volley — instead of caching it
+    for the next webhook (which would put the reply one turn behind).
+
     Reads:  s.pending_transcript, s.last_run_transcript, s.call_ended
     Writes: s.last_run_transcript, s.pending_reply, s.hangup_after_reply
     """
-    try:
-        await asyncio.sleep(DEBOUNCE_S)
-    except asyncio.CancelledError:
-        log.info("DEBOUNCE[%s] cancelled (newer webhook arrived) before timer fired", req_id)
-        return
+    await asyncio.sleep(DEBOUNCE_S)  # cancellation here propagates to the awaiter
 
-    try:
-        async with s.lock:
-            if s.call_ended:
-                log.info(
-                    "DEBOUNCE[%s] aborted (call_ended) call_id=%s",
-                    req_id, s.agentphone_call_id,
-                )
-                return
-            transcript_to_run = (s.pending_transcript or "").strip()
-            if not transcript_to_run:
-                log.info("DEBOUNCE[%s] no-op (empty pending_transcript)", req_id)
-                return
-            if transcript_to_run == s.last_run_transcript:
-                log.info(
-                    "DEBOUNCE[%s] no-op (transcript unchanged) transcript_len=%d",
-                    req_id, len(transcript_to_run),
-                )
-                return
-            s.last_run_transcript = transcript_to_run
-            s.last_caller_utterance = transcript_to_run
-            s.current_req_id = req_id
-            t_turn = time.perf_counter()
-            try:
-                reply = await run_turn(s, transcript_to_run, req_id=req_id)
-            except Exception as e:  # noqa: BLE001
-                log.exception("DEBOUNCE[%s] run_turn raised: %s", req_id, e)
-                return
-            turn_ms = (time.perf_counter() - t_turn) * 1000
-            hangup = bool(s.hangup_after_reply)
-            # When end_call fires, the agent.py end_call branch already set
-            # pending_reply to the goodbye — don't overwrite. For normal
-            # turns this becomes the sticky reply that subsequent volley
-            # webhooks return until a fresh debounced turn supersedes it.
-            if not hangup:
-                s.pending_reply = reply or ""
-            total_wait_ms = (time.perf_counter() - t_arrival) * 1000
+    async with s.lock:
+        if s.call_ended:
             log.info(
-                "DEBOUNCE[%s] fired transcript_len=%d reply_len=%d turn_ms=%.0f total_wait_ms=%.0f hangup=%s state=%s preview=%r",
-                req_id, len(transcript_to_run), len(reply or ""), turn_ms,
-                total_wait_ms, hangup, s.current_state, (reply or "")[:80],
+                "DEBOUNCE[%s] aborted (call_ended) call_id=%s",
+                req_id, s.agentphone_call_id,
             )
-    except asyncio.CancelledError:
-        log.info("DEBOUNCE[%s] cancelled mid-execution (newer webhook arrived)", req_id)
-        raise
+            return ""
+        transcript_to_run = (s.pending_transcript or "").strip()
+        if not transcript_to_run:
+            log.info("DEBOUNCE[%s] no-op (empty pending_transcript)", req_id)
+            return ""
+        if transcript_to_run == s.last_run_transcript:
+            log.info(
+                "DEBOUNCE[%s] no-op (transcript unchanged) transcript_len=%d",
+                req_id, len(transcript_to_run),
+            )
+            return s.pending_reply or ""
+        s.last_run_transcript = transcript_to_run
+        s.last_caller_utterance = transcript_to_run
+        s.current_req_id = req_id
+        t_turn = time.perf_counter()
+        try:
+            reply = await run_turn(s, transcript_to_run, req_id=req_id)
+        except Exception as e:  # noqa: BLE001
+            log.exception("DEBOUNCE[%s] run_turn raised: %s", req_id, e)
+            return s.pending_reply or ""
+        turn_ms = (time.perf_counter() - t_turn) * 1000
+        hangup = bool(s.hangup_after_reply)
+        # When end_call fires, the agent.py end_call branch already set
+        # pending_reply to the goodbye — don't overwrite. For normal turns
+        # this becomes the sticky reply that any race-survivor webhooks
+        # might still want to read.
+        if not hangup:
+            s.pending_reply = reply or ""
+        total_wait_ms = (time.perf_counter() - t_arrival) * 1000
+        log.info(
+            "DEBOUNCE[%s] fired transcript_len=%d reply_len=%d turn_ms=%.0f total_wait_ms=%.0f hangup=%s state=%s preview=%r",
+            req_id, len(transcript_to_run), len(reply or ""), turn_ms,
+            total_wait_ms, hangup, s.current_state, (reply or "")[:80],
+        )
+        return reply or ""
 
 
-def _schedule_debounced_turn(s, transcript: str, req_id: str, t_arrival: float) -> bool:
+def _schedule_debounced_turn(s, transcript: str, req_id: str, t_arrival: float) -> asyncio.Task:
     """Caller MUST hold s.lock. Updates pending_transcript to the latest
     seen text, cancels any prior in-flight debounced task, schedules a
-    fresh one. Returns True iff a prior task was cancelled (purely for
-    log breadcrumbing).
+    fresh one, and returns the new task so the caller can await it
+    outside the lock.
     """
     s.pending_transcript = transcript or ""
     cancelled = s.cancel_pending_turn(reason="superseded_by_new_webhook")
-    s.pending_turn_task = asyncio.create_task(_debounced_turn(s, req_id, t_arrival))
+    task = asyncio.create_task(_debounced_turn(s, req_id, t_arrival))
+    s.pending_turn_task = task
     log.info(
         "WEBHOOK[%s] debounce scheduled transcript_len=%d delay_s=%.2f (prior task cancelled=%s)",
         req_id, len(transcript or ""), DEBOUNCE_S, cancelled,
     )
-    return cancelled
+    return task
+
+
+async def _await_scheduled_turn(s, task: asyncio.Task, req_id: str) -> str:
+    """Await a debounced turn task scheduled by _schedule_debounced_turn.
+    Returns the agent's reply on success, "" if a newer webhook cancelled
+    this task (i.e. another webhook in the same ASR volley will deliver
+    the reply on its own HTTP response).
+    """
+    try:
+        return await task
+    except asyncio.CancelledError:
+        log.info(
+            "WEBHOOK[%s] my debounce task cancelled by newer webhook — returning empty",
+            req_id,
+        )
+        return ""
+    except Exception as e:  # noqa: BLE001
+        log.warning("WEBHOOK[%s] debounce task raised: %s", req_id, e)
+        return s.pending_reply or ""
+
+
+def _consume_hangup(s) -> bool:
+    """If a hangup is pending, consume the flag exactly once and clear
+    pending_reply so subsequent webhooks don't loop back into the
+    `call_ended_deliver_goodbye` defensive branch."""
+    if s.hangup_after_reply:
+        s.hangup_after_reply = False
+        s.pending_reply = ""
+        return True
+    return False
 
 
 # ---------- AgentPhone webhook ----------
@@ -306,9 +335,16 @@ async def _handle_agentphone_webhook(request: Request) -> dict:
         incoming_call_id, channel,
         isinstance(data.get("transcript"), str) and bool((data.get("transcript") or "").strip()),
     )
-    # Keep the old dump line at DEBUG so we still have it when troubleshooting
-    # without flooding INFO with full webhook payloads.
-    log.debug("WEBHOOK[%s] body=%s", req_id, json.dumps(body)[:600])
+    # If caller phone is missing on an active-call webhook, dump the body at
+    # INFO so we can diagnose payload-shape drift from AgentPhone. Otherwise
+    # keep it at DEBUG to avoid flooding the log.
+    if event in ("agent.message",) and not caller:
+        log.info(
+            "WEBHOOK[%s] caller missing on agent.message — body keys=%s data keys=%s body=%s",
+            req_id, list(body.keys()), list(data.keys()), json.dumps(body)[:800],
+        )
+    else:
+        log.debug("WEBHOOK[%s] body=%s", req_id, json.dumps(body)[:600])
 
     # Only voice for now. SMS would need a different reply shape.
     if channel != "voice":
@@ -413,14 +449,14 @@ async def _handle_agentphone_webhook(request: Request) -> dict:
             return _finalize(req_id, t_arrival, greeting, ctx)
         # Non-empty transcript: AgentPhone already greeted, caller already spoke.
         # Route through the same debounce as ongoing turns so the first turn
-        # benefits from the ASR-volley wait. The HTTP response is empty here;
-        # the agent's first reply will surface on the next webhook (likely an
-        # ASR-final or the next utterance start). See DEBOUNCE_S comment.
+        # benefits from the ASR-volley wait. We AWAIT the scheduled task so
+        # the reply rides out on the same HTTP response that closed the
+        # volley — no "one turn behind" effect.
         s.current_req_id = req_id
         ctx["state"] = s.current_state
         log.info(
             "WEBHOOK[%s] FIRST_CONTACT caller_tail=%s transcript_present=True prepending_greeting=False "
-            "branch=with_turn — debouncing first turn (reply surfaces on next webhook). transcript_len=%d",
+            "branch=with_turn — debouncing first turn (awaiting task). transcript_len=%d",
             req_id, caller_tail, len(transcript),
         )
         t_lock_req = time.perf_counter()
@@ -430,13 +466,12 @@ async def _handle_agentphone_webhook(request: Request) -> dict:
             ctx["lock_ms"] = f"{lock_ms:.0f}"
             _log_lock_acquired(req_id, lock_ms)
             s.last_caller_utterance = transcript
-            _schedule_debounced_turn(s, transcript, req_id, t_arrival)
+            my_task = _schedule_debounced_turn(s, transcript, req_id, t_arrival)
+        reply = await _await_scheduled_turn(s, my_task, req_id)
+        hangup = _consume_hangup(s)
         ctx["state"] = s.current_state
         ctx["branch"] = "first_contact_with_turn_debounced"
-        # First contact has no prior pending_reply — return empty so AgentPhone
-        # waits silently for the debounced first turn to land in pending_reply,
-        # which a subsequent webhook will pick up.
-        return _finalize(req_id, t_arrival, "", ctx)
+        return _finalize(req_id, t_arrival, reply, ctx, hangup=hangup)
 
     # If we don't yet have a callId stored (e.g. session created before
     # AgentPhone sent one), pick it up from this event.
@@ -461,14 +496,10 @@ async def _handle_agentphone_webhook(request: Request) -> dict:
         ctx["lock_ms"] = f"{lock_ms:.0f}"
         _log_lock_acquired(req_id, lock_ms)
         if s.call_ended:
-            # Deferred goodbye delivery path. The end_call tool fires from
-            # inside a debounced task, so the goodbye + hangup couldn't have
-            # ridden the SAME webhook that triggered it — it landed in
-            # pending_reply only after that webhook had already returned.
-            # If a subsequent webhook arrives (caller said "thanks", or
-            # AgentPhone sends a follow-up before tearing down), use it as
-            # the carrier for the goodbye + hangup body flag. Clear the
-            # flags so we don't repeat.
+            # Defensive: end_call has already fully run. If a hangup is
+            # still pending (rare — would mean the goodbye couldn't ride
+            # its triggering webhook for some reason), deliver it here
+            # and clear the flag.
             if s.hangup_after_reply and s.pending_reply:
                 ctx["branch"] = "call_ended_deliver_goodbye"
                 goodbye = s.pending_reply
@@ -488,17 +519,15 @@ async def _handle_agentphone_webhook(request: Request) -> dict:
             return _finalize(req_id, t_arrival, "", ctx)
 
         # ASR debounce: AgentPhone splits a single caller utterance across
-        # multiple webhooks (intra-utterance gaps up to 2.8s). We coalesce
-        # by always overwriting pending_transcript with the latest text,
-        # cancelling the prior debounced task, and scheduling a fresh one
-        # on a DEBOUNCE_S timer. The HTTP response returns the previously-
-        # cached agent reply so AgentPhone never plays silence; the new
-        # turn surfaces on the next webhook after the timer fires.
+        # multiple webhooks (intra-utterance gaps up to 2.8s). Each webhook
+        # overwrites pending_transcript with the latest text, cancels the
+        # prior debounced task, schedules a fresh one, and AWAITS it.
+        # When a newer webhook cancels this one, our await throws
+        # CancelledError and we return empty. The last-surviving webhook's
+        # task completes normally and its reply rides out on the same
+        # HTTP response — no "one turn behind" effect.
         #
-        # Dedup classification (identical / prefix / fuzzy / none) is kept
-        # for log clarity only — it's no longer load-bearing because the
-        # debounce itself handles ASR coalescing. All branches converge on
-        # the same scheduling path.
+        # Dedup classification is kept for log clarity only.
         prev = s.last_caller_utterance
         dedup_kind = "none"
         if prev:
@@ -510,15 +539,16 @@ async def _handle_agentphone_webhook(request: Request) -> dict:
                 dedup_kind = "fuzzy"
         ctx["dedup"] = dedup_kind
         s.last_caller_utterance = transcript
-        cached = s.pending_reply or ""
         log.info(
-            "WEBHOOK[%s] dedup_kind=%s prev_len=%d now_len=%d cached_reply_len=%d — debouncing",
-            req_id, dedup_kind, len(prev), len(transcript), len(cached),
+            "WEBHOOK[%s] dedup_kind=%s prev_len=%d now_len=%d — debouncing (will await)",
+            req_id, dedup_kind, len(prev), len(transcript),
         )
-        _schedule_debounced_turn(s, transcript, req_id, t_arrival)
+        my_task = _schedule_debounced_turn(s, transcript, req_id, t_arrival)
         ctx["branch"] = "ongoing_debounce_scheduled"
+    reply = await _await_scheduled_turn(s, my_task, req_id)
+    hangup = _consume_hangup(s)
     ctx["state"] = s.current_state
-    return _finalize(req_id, t_arrival, cached, ctx)
+    return _finalize(req_id, t_arrival, reply, ctx, hangup=hangup)
 
 
 def _log_lock_acquired(req_id: str, lock_ms: float) -> None:

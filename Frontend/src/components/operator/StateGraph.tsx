@@ -12,8 +12,12 @@ const NODE_H = 64
 
 type Status = 'pending' | 'active' | 'visited' | 'eliminated'
 
+function r(n: number): number {
+  return Math.round(n * 100) / 100
+}
+
 function px(x: number, y: number): [number, number] {
-  return [x * VB_W, y * VB_H]
+  return [r(x * VB_W), r(y * VB_H)]
 }
 
 function nodeStatus(name: StateName, current: StateName, visited: Set<StateName>, eliminated: Set<StateName>): Status {
@@ -49,8 +53,9 @@ const NODE_TEXT: Record<Status, string> = {
 }
 
 function curve(x1: number, y1: number, x2: number, y2: number): string {
-  const mx = (x1 + x2) / 2
-  return `M ${x1} ${y1} Q ${mx} ${y1}, ${mx} ${(y1 + y2) / 2} T ${x2} ${y2}`
+  const mx = r((x1 + x2) / 2)
+  const my = r((y1 + y2) / 2)
+  return `M ${r(x1)} ${r(y1)} Q ${mx} ${r(y1)}, ${mx} ${my} T ${r(x2)} ${r(y2)}`
 }
 
 export function StateGraph() {
@@ -99,10 +104,10 @@ export function StateGraph() {
             const dx = tx - fx, dy = ty - fy
             const len = Math.hypot(dx, dy) || 1
             const nx = dx / len, ny = dy / len
-            const sx = fx + nx * (NODE_W / 2)
-            const sy = fy + ny * (NODE_H / 2)
-            const ex = tx - nx * (NODE_W / 2)
-            const ey = ty - ny * (NODE_H / 2)
+            const sx = r(fx + nx * (NODE_W / 2))
+            const sy = r(fy + ny * (NODE_H / 2))
+            const ex = r(tx - nx * (NODE_W / 2))
+            const ey = r(ty - ny * (NODE_H / 2))
             const d = curve(sx, sy, ex, ey)
 
             return (
@@ -118,7 +123,7 @@ export function StateGraph() {
                   transition={isFresh ? { duration: 0.8, ease: [0.165, 0.84, 0.44, 1] } : undefined}
                 />
                 {isFresh && lastTransition?.confidence != null && (
-                  <ForkBadge x={(sx + ex) / 2} y={(sy + ey) / 2} confidence={lastTransition.confidence} />
+                  <ForkBadge x={r((sx + ex) / 2)} y={r((sy + ey) / 2)} confidence={lastTransition.confidence} />
                 )}
               </g>
             )
