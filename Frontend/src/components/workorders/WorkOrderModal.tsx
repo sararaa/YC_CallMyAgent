@@ -81,7 +81,7 @@ export function WorkOrderModal() {
                   { label: 'Assigned Tech', value: currentWO.assignedTech || 'Unassigned' },
                 ].map(({ label, value }) => (
                   <div key={label} className="bg-white/5 rounded-lg p-3">
-                    <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">{label}</p>
+                    <p className="text-[15px] uppercase tracking-wider text-slate-500 mb-1">{label}</p>
                     <p className="text-sm text-slate-200 font-mono">{value}</p>
                   </div>
                 ))}

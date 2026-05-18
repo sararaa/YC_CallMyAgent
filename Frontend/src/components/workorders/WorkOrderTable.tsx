@@ -3,49 +3,50 @@ import Link from 'next/link'
 import { motion } from 'framer-motion'
 import { WorkOrder } from '@/lib/types'
 import { urgencyBg, statusBg, statusLabel, formatDate } from '@/lib/utils'
-import { Eye } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
+
+const COLS = ['WO #', 'Date', 'Charger', 'Location', 'Fault', 'Priority', 'Status', 'Tech', '']
 
 export function WorkOrderTable({ orders }: { orders: WorkOrder[] }) {
   return (
-    <div className="glass rounded-xl overflow-hidden">
-      <table className="w-full text-sm">
+    <div className="panel overflow-hidden">
+      <table className="w-full">
         <thead>
-          <tr className="border-b border-white/[0.06]">
-            {['WO #', 'Date', 'Charger', 'Location', 'Fault', 'Urgency', 'Status', 'Tech', ''].map((h) => (
-              <th key={h} className="text-left px-4 py-3 text-[10px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap">
+          <tr className="border-b border-border">
+            {COLS.map((h) => (
+              <th key={h} className="text-left px-4 py-2.5 text-[15px] font-medium text-text-muted whitespace-nowrap">
                 {h}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody>
+        <tbody className="divide-y divide-border">
           {orders.map((wo, i) => (
             <motion.tr
               key={wo.id}
-              initial={{ opacity: 0, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.04 }}
-              className="border-b border-white/[0.04] hover:bg-white/5 transition-colors group cursor-pointer"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: i * 0.03 }}
+              className="hover:bg-bg-hover transition-colors group"
             >
-              <td className="px-4 py-3 font-mono text-cyan-electric whitespace-nowrap">{wo.woNumber}</td>
-              <td className="px-4 py-3 text-slate-400 whitespace-nowrap">{formatDate(wo.date)}</td>
-              <td className="px-4 py-3 font-mono text-white whitespace-nowrap">{wo.chargerId}</td>
-              <td className="px-4 py-3 text-slate-400 max-w-[160px] truncate">{wo.location}</td>
-              <td className="px-4 py-3 font-mono text-amber-400 whitespace-nowrap">{wo.faultCode}</td>
-              <td className="px-4 py-3">
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${urgencyBg(wo.urgency)}`}>{wo.urgency}</span>
+              <td className="px-4 py-2.5 font-mono text-[15px] text-cyan-electric whitespace-nowrap">{wo.woNumber}</td>
+              <td className="px-4 py-2.5 text-[15px] text-text-muted whitespace-nowrap">{formatDate(wo.date)}</td>
+              <td className="px-4 py-2.5 font-mono text-[15px] text-text-primary whitespace-nowrap">{wo.chargerId}</td>
+              <td className="px-4 py-2.5 text-[15px] text-text-muted max-w-[160px] truncate">{wo.location}</td>
+              <td className="px-4 py-2.5 font-mono text-[15px] text-amber-warn/80 whitespace-nowrap">{wo.faultCode}</td>
+              <td className="px-4 py-2.5">
+                <span className={`text-[15px] px-1.5 py-0.5 rounded font-semibold ${urgencyBg(wo.urgency)}`}>{wo.urgency}</span>
               </td>
-              <td className="px-4 py-3">
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${statusBg(wo.status)}`}>{statusLabel(wo.status)}</span>
+              <td className="px-4 py-2.5">
+                <span className={`text-[15px] px-1.5 py-0.5 rounded font-semibold ${statusBg(wo.status)}`}>{statusLabel(wo.status)}</span>
               </td>
-              <td className="px-4 py-3 text-slate-400 whitespace-nowrap">{wo.assignedTech || '—'}</td>
-              <td className="px-4 py-3">
+              <td className="px-4 py-2.5 text-[15px] text-text-muted whitespace-nowrap">{wo.assignedTech || '—'}</td>
+              <td className="px-4 py-2.5">
                 <Link
                   href={`/work-orders/${wo.id}`}
-                  className="flex items-center gap-1 text-xs text-slate-500 hover:text-cyan-electric transition-colors"
+                  className="flex items-center gap-1 text-[15px] text-text-muted hover:text-text-primary transition-colors group-hover:opacity-100 opacity-0"
                 >
-                  <Eye className="w-3.5 h-3.5" />
-                  View
+                  View <ArrowRight className="w-3 h-3" />
                 </Link>
               </td>
             </motion.tr>

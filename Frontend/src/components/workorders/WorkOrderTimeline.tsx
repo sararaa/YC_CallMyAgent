@@ -21,7 +21,7 @@ export function WorkOrderTimeline({ events }: { events: WorkOrderTimelineEvent[]
             </div>
             <div>
               <p className="text-sm text-white font-medium">{event.event}</p>
-              <p className="text-[10px] font-mono text-slate-500 mt-0.5">{new Date(event.timestamp).toLocaleString()}</p>
+              <p className="text-[15px] font-mono text-slate-500 mt-0.5">{new Date(event.timestamp).toLocaleString()}</p>
               {event.note && (
                 <p className="text-xs text-slate-400 mt-1 bg-white/5 rounded-lg px-2.5 py-1.5">{event.note}</p>
               )}

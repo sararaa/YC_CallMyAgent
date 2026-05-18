@@ -1,6 +1,6 @@
 /**
  * GET /api/workorders — proxies to Python /api/admin/work_orders, adapting
- * the schema to the ChargePulse WorkOrder shape and applying client-style
+ * the schema to the PigeonPlatform WorkOrder shape and applying client-style
  * search/status filtering and pagination.
  */
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -20,7 +20,7 @@ function toFrontendWO(r: Record<string, unknown>): Record<string, unknown> {
     woNumber: `WO-${new Date(created).getFullYear()}-${String(id).padStart(4, "0")}`,
     date: created,
     chargerId: r.charger_id,
-    location: `Volt Network · ${String(r.charger_id || "").toUpperCase()} pad`,
+    location: `PigeonPlatform · ${String(r.charger_id || "").toUpperCase()} pad`,
     customerName: "—",
     faultCode: "—",
     urgency,

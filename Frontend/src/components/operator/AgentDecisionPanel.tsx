@@ -1,19 +1,21 @@
 'use client'
 import { useOperatorStore } from '@/store/operatorStore'
 import { cn } from '@/lib/utils'
+import { Cpu } from 'lucide-react'
 
-function dots(value: number) {
-  const filled = Math.max(1, Math.min(5, Math.round(value * 5)))
-  const color =
-    value < 0.2 ? 'bg-red-critical' :
-    value < 0.6 ? 'bg-amber-warn' :
+function ConfBar({ value }: { value: number }) {
+  const pct = Math.round(value * 100)
+  const barColor =
+    value < 0.4 ? 'bg-red-critical' :
+    value < 0.7 ? 'bg-amber-warn' :
     'bg-cyan-electric'
   return (
-    <span className="inline-flex gap-[3px]">
-      {[0,1,2,3,4].map((i) => (
-        <span key={i} className={cn('h-[6px] w-[6px] rounded-full', i < filled ? color : 'bg-white/[0.08]')} />
-      ))}
-    </span>
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-1 bg-bg-hover rounded-full overflow-hidden">
+        <div className={cn('h-full rounded-full transition-all duration-500', barColor)} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-[15px] font-mono text-text-muted tabular-nums w-7 text-right">{pct}%</span>
+    </div>
   )
 }
 
@@ -22,29 +24,36 @@ export function AgentDecisionPanel() {
   const toolsAvailable = useOperatorStore((s) => s.toolsAvailable)
 
   return (
-    <div className="glass rounded-xl panel-shadow p-3">
-      <div className="flex items-baseline justify-between">
-        <p className="text-[10px] font-bold tracking-widest text-cyan-electric">GEMINI · AGENT LOOP</p>
-        <p className="text-[10px] text-slate-500 font-mono">2.5 Flash</p>
+    <div className="panel p-3 shrink-0">
+      <div className="flex items-center gap-2 mb-2.5">
+        <Cpu className="w-3.5 h-3.5 text-text-muted" />
+        <span className="text-[15px] font-medium text-text-primary">Agent loop</span>
+        <span className="ml-auto text-[15px] text-text-muted font-mono">Gemini 2.5 Flash</span>
       </div>
-      <div className="h-px bg-white/[0.06] my-2" />
-      <p className="text-[10px] uppercase tracking-wider text-slate-500">Last decision</p>
+
       {d ? (
-        <>
-          <div className="mt-1 flex items-center justify-between gap-2">
-            <p className="font-mono text-[11.5px] text-slate-200 truncate">{d.tool}</p>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-mono text-slate-300">{d.confidence != null ? d.confidence.toFixed(2) : '—'}</span>
-              {d.confidence != null && dots(d.confidence)}
-            </div>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[15px] font-mono text-cyan-electric bg-cyan-electric/10 border border-cyan-electric/20 px-2 py-0.5 rounded truncate">
+              {d.tool}
+            </span>
+            <span className="text-[15px] text-text-muted shrink-0">
+              {toolsAvailable.length} tools
+            </span>
           </div>
-          <p className="mt-1 text-[11px] text-slate-400 line-clamp-2 italic" title={d.reason || ''}>{d.reason || '—'}</p>
-        </>
+          {d.confidence != null && <ConfBar value={d.confidence} />}
+          {d.reason && (
+            <p className="text-[15px] text-text-muted leading-relaxed line-clamp-2 italic">
+              "{d.reason}"
+            </p>
+          )}
+        </div>
       ) : (
-        <p className="mt-1 text-[11px] text-slate-500">No decisions yet.</p>
+        <div className="flex items-center justify-between">
+          <p className="text-[15px] text-text-muted">No decisions yet</p>
+          <span className="text-[15px] text-text-muted">{toolsAvailable.length} tools available</span>
+        </div>
       )}
-      <div className="h-px bg-white/[0.06] my-2" />
-      <p className="text-[10.5px] text-slate-500 font-mono">{toolsAvailable.length} tools available this turn</p>
     </div>
   )
 }
